@@ -21,10 +21,10 @@ decl_event!(
 	pub enum Event<T> 
     where 
         <T as system::Trait>::AccountId,
+        <T as system::Trait>::Hash,
         <T as balances::Trait>::Balance,
-        Symbol = Vec<u8>,
     {
-		Issued(AccountId, Symbol, Balance),
+		Issued(AccountId, Balance, Hash),
 	}
 );
 
@@ -59,10 +59,11 @@ impl<T: Trait> Module<T> {
 
         let nonce = <Nonce<T>>::get();
 
-        let hash = (<system::Module<T>>::random_seed(), &sender, nonce)
+        let hash = (<system::Module<T>>::random_seed(), sender.clone(), nonce)
                 .using_encoded(<T as system::Trait>::Hashing::hash);
 
         runtime_io::print("hash");
+        runtime_io::print(hash.as_ref());        
 
         let token = Token {
             hash: hash.clone(),
@@ -75,7 +76,7 @@ impl<T: Trait> Module<T> {
         <BalanceOf<T>>::insert((sender.clone(), hash.clone()), total_supply);
         <FreeBalanceOf<T>>::insert((sender.clone(), hash.clone()), total_supply);
 
-        Self::deposit_event(RawEvent::Issued(sender, symbol, total_supply));
+        Self::deposit_event(RawEvent::Issued(sender, total_supply, hash.clone()));
 
         Ok(())
     }
