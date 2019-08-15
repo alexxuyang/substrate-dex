@@ -7,4 +7,4 @@ set -e
 cargo build
 
 cargo run -- purge-chain --dev -y
-target/debug/dex --dev --ws-external
+target/debug/dex --dev --ws-external -ltxpool=trace

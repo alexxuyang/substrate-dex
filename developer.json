@@ -1,0 +1,7 @@
+{
+    "Token": {
+      "hash": "H256",
+      "symbol": "Vec<u8>",
+      "total_supply": "Balance"
+    }
+  }

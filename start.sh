@@ -6,4 +6,4 @@ set -e
 
 cargo build
 
-target/debug/dex --dev --ws-external
+target/debug/dex --dev --ws-external -ltxpool=trace
