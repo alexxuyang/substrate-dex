@@ -30,7 +30,7 @@ decl_event!(
 
 decl_storage! {
     trait Store for Module<T: Trait> as token {
-        Tokens get(token): map T::Hash => Token<T::Hash, T::Balance>;
+        Tokens get(token): map T::Hash => Option<Token<T::Hash, T::Balance>>;
         BalanceOf get(balance_of): map (T::AccountId, T::Hash) => T::Balance;
         FreeBalanceOf get(free_balance_of): map (T::AccountId, T::Hash) => T::Balance;
         FreezedBalanceOf get(freezed_balance_of): map (T::AccountId, T::Hash) => T::Balance;
@@ -46,10 +46,6 @@ decl_module! {
         pub fn issue(origin, symbol: Vec<u8>, total_supply: T::Balance) -> Result {
             Self::do_issue(origin, symbol, total_supply)
         }
-
-        pub fn transfer(origin, token_hash: T::Hash, to: T::AccountId, amount: T::Balance) -> Result {
-            Self::do_transfer(origin, token_hash, to, amount)
-        }
     }
 }
 
@@ -59,8 +55,7 @@ impl<T: Trait> Module<T> {
 
         let nonce = <Nonce<T>>::get();
 
-        let hash = (<system::Module<T>>::random_seed(), sender.clone(), nonce)
-                .using_encoded(<T as system::Trait>::Hashing::hash);
+        let hash = (<system::Module<T>>::random_seed(), sender.clone(), nonce).using_encoded(<T as system::Trait>::Hashing::hash);
 
         runtime_io::print("hash");
         runtime_io::print(hash.as_ref());        
@@ -77,20 +72,6 @@ impl<T: Trait> Module<T> {
         <FreeBalanceOf<T>>::insert((sender.clone(), hash.clone()), total_supply);
 
         Self::deposit_event(RawEvent::Issued(sender, total_supply, hash.clone()));
-
-        Ok(())
-    }
-
-    fn do_transfer(origin: T::Origin, token_hash: T::Hash, to: T::AccountId, amount: T::Balance) -> Result {
-        let sender = ensure_signed(origin)?;
-
-        ensure!(<FreeBalanceOf<T>>::exists((sender.clone(), token_hash)), "sender does not have the token");
-
-        let from_amount = Self::free_balance_of((sender.clone(), token_hash));
-
-        ensure!(from_amount >= amount, "sender does not have enough balance");
-
-        // ensure!();
 
         Ok(())
     }
