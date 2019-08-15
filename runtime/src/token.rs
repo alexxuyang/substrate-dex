@@ -1,9 +1,8 @@
-use support::{decl_storage, decl_module, StorageValue, StorageMap, decl_event, dispatch::Result, ensure, Parameter};
+use support::{decl_storage, decl_module, StorageValue, StorageMap, decl_event, dispatch::Result, ensure};
 use system::ensure_signed;
-use runtime_primitives::traits::{CheckedSub, CheckedAdd, Member, SimpleArithmetic, As, Hash, Zero};
-use parity_codec::{Encode, Decode, Codec};
+use runtime_primitives::traits::{As, Hash};
+use parity_codec::{Encode, Decode};
 use rstd::prelude::Vec;
-use runtime_io::print;
 
 #[derive(Encode, Decode, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "std", derive(Debug))]
