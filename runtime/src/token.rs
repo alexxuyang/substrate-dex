@@ -26,6 +26,7 @@ decl_event!(
 		Issued(AccountId, Hash, Balance),
         Transferd(AccountId, AccountId, Hash, Balance),
         Freezed(AccountId, Hash, Balance),
+        UnFreezed(AccountId, Hash, Balance),
 	}
 );
 
@@ -54,6 +55,10 @@ decl_module! {
 
         pub fn freeze(origin, token_hash: T::Hash, amount: T::Balance) -> Result {
             Self::do_freeze(origin, token_hash, amount)
+        }
+
+        pub fn unfreeze(origin, token_hash: T::Hash, amount: T::Balance) -> Result {
+            Self::do_unfreeze(origin, token_hash, amount)
         }
     }
 }
@@ -137,6 +142,28 @@ impl<T: Trait> Module<T> {
         <FreezedBalanceOf<T>>::insert((sender.clone(), hash.clone()), old_freezed_amount + amount);
 
         Self::deposit_event(RawEvent::Freezed(sender, hash, amount));
+
+        Ok(())
+    }
+
+    fn do_unfreeze(origin: T::Origin, hash: T::Hash, amount: T::Balance) -> Result {
+        
+        let token = Self::token(hash);
+        ensure!(token.is_some(), "no matching token found");
+
+        let sender = ensure_signed(origin)?;
+        ensure!(<FreeBalanceOf<T>>::exists((sender.clone(), hash.clone())), "sender does not have the token");
+
+        let old_freezed_amount = Self::freezed_balance_of((sender.clone(), hash.clone()));
+        ensure!(old_freezed_amount >= amount, "can not unfreeze more than available tokens");
+
+        let old_free_amount = Self::free_balance_of((sender.clone(), hash.clone()));
+        ensure!((old_free_amount + amount).as_() <= u64::max_value(), "unfreezed amount overflow");
+
+        <FreeBalanceOf<T>>::insert((sender.clone(), hash.clone()), old_free_amount + amount);
+        <FreezedBalanceOf<T>>::insert((sender.clone(), hash.clone()), old_freezed_amount - amount);
+
+        Self::deposit_event(RawEvent::UnFreezed(sender, hash, amount));
 
         Ok(())
     }
