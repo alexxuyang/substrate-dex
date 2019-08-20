@@ -33,6 +33,7 @@ decl_event!(
 decl_storage! {
     trait Store for Module<T: Trait> as token {
         Tokens get(token): map T::Hash => Option<Token<T::Hash, T::Balance>>;
+        Owners get(owner): map T::Hash => Option<T::AccountId>;
         BalanceOf get(balance_of): map (T::AccountId, T::Hash) => T::Balance;
         FreeBalanceOf get(free_balance_of): map (T::AccountId, T::Hash) => T::Balance;
         FreezedBalanceOf get(freezed_balance_of): map (T::AccountId, T::Hash) => T::Balance;
@@ -82,6 +83,7 @@ impl<T: Trait> Module<T> {
 
         <Nonce<T>>::mutate(|n| *n += 1);
         <Tokens<T>>::insert(hash.clone(), token);
+        <Owners<T>>::insert(hash.clone(), sender.clone());
         <BalanceOf<T>>::insert((sender.clone(), hash.clone()), total_supply);
         <FreeBalanceOf<T>>::insert((sender.clone(), hash.clone()), total_supply);
 
