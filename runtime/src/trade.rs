@@ -62,9 +62,11 @@ impl<T> LimitOrder<T> where T: Trait {
 decl_storage! {
 	trait Store for Module<T: Trait> as trade {
 		TradePairsByHash get(trade_pair_by_hash): map T::Hash => Option<TradePair<T::Hash>>;
-		TradePairsByBaseQuoto get(trade_pair_by_base_quoto): map (T::Hash, T::Hash) => Option<TradePair<T::Hash>>;
+		TradePairsHashByBaseQuoto get(trade_pair_hash_by_base_quoto): map (T::Hash, T::Hash) => Option<T::Hash>;
 
 		Orders get(order): map T::Hash => Option<LimitOrder<T>>;
+		OwnedOrders get(owned_orders): map (T::AccountId, u64) => Option<T::Hash>;
+		OwnedOrdersIndex get(owned_orders_index): map T::AccountId => u64;
 
 		Nonce: u64;
 	}
@@ -112,6 +114,10 @@ decl_module! {
 			<token::Module<T>>::ensure_free_balance(sender.clone(), op_token_hash, amount)?;
 			<Orders<T>>::insert(hash, order);
 
+			let owned_index = Self::owned_orders_index(sender.clone());
+			<OwnedOrders<T>>::insert((sender.clone(), owned_index), hash);
+			<OwnedOrdersIndex<T>>::insert(sender.clone(), owned_index + 1);
+
 			Self::deposit_event(RawEvent::OrderCreated(sender.clone(), hash, base, quoto, price, amount));
 
 			Ok(())
@@ -120,8 +126,17 @@ decl_module! {
 }
 
 impl<T: Trait> Module<T> {
+	fn get_trade_pair_by_base_quoto(base: T::Hash, quoto: T::Hash) -> Option<TradePair<T::Hash>> {
+		let hash = Self::trade_pair_hash_by_base_quoto((base, quoto));
+
+		match hash {
+			Some(h) => Self::trade_pair_by_hash(h),
+			None => None,
+		}
+	}
+
 	fn ensure_trade_pair(base: T::Hash, quoto: T::Hash) -> Result {
-		let bq = Self::trade_pair_by_base_quoto((base, quoto));
+		let bq = Self::get_trade_pair_by_base_quoto(base, quoto);
 		ensure!(bq.is_some(), "not trade pair with base & quoto");
 
 		Ok(())
@@ -142,8 +157,8 @@ impl<T: Trait> Module<T> {
 		
 		ensure!(sender == base_owner || sender == quoto_owner, "sender should be equal to owner of base or quoto token");
 
-		let bq = Self::trade_pair_by_base_quoto((base, quoto));
-		let qb = Self::trade_pair_by_base_quoto((quoto, base));
+		let bq = Self::get_trade_pair_by_base_quoto(base, quoto);
+		let qb = Self::get_trade_pair_by_base_quoto(quoto, base);
 
 		ensure!(!bq.is_some() && !qb.is_some(), "the same trade pair already exists");
 
@@ -158,7 +173,7 @@ impl<T: Trait> Module<T> {
 
 		<Nonce<T>>::mutate(|n| *n += 1);
 		<TradePairsByHash<T>>::insert(hash, tp.clone());
-		<TradePairsByBaseQuoto<T>>::insert((base, quoto), tp.clone());
+		<TradePairsHashByBaseQuoto<T>>::insert((base, quoto), hash);
 
 		Self::deposit_event(RawEvent::TradePairCreated(sender, hash, tp));
 
