@@ -54,12 +54,18 @@ decl_module! {
             Self::do_transfer(origin, token_hash, to, amount)
         }
 
-        pub fn freeze(origin, token_hash: T::Hash, amount: T::Balance) -> Result {
-            Self::do_freeze(origin, token_hash, amount)
+        pub fn freeze(origin, hash: T::Hash, amount: T::Balance) -> Result {
+            let sender = ensure_signed(origin)?;
+            ensure!(<FreeBalanceOf<T>>::exists((sender.clone(), hash.clone())), "sender does not have the token");
+
+            Self::do_freeze(sender, hash, amount)
         }
 
-        pub fn unfreeze(origin, token_hash: T::Hash, amount: T::Balance) -> Result {
-            Self::do_unfreeze(origin, token_hash, amount)
+        pub fn unfreeze(origin, hash: T::Hash, amount: T::Balance) -> Result {
+            let sender = ensure_signed(origin)?;
+            ensure!(<FreeBalanceOf<T>>::exists((sender.clone(), hash.clone())), "sender does not have the token");
+
+            Self::do_unfreeze(sender, hash, amount)
         }
     }
 }
@@ -73,7 +79,7 @@ impl<T: Trait> Module<T> {
         let hash = (<system::Module<T>>::random_seed(), sender.clone(), nonce).using_encoded(<T as system::Trait>::Hashing::hash);
 
         runtime_io::print("hash");
-        runtime_io::print(hash.as_ref());        
+        runtime_io::print(hash.as_ref());
 
         let token = Token {
             hash: hash.clone(),
@@ -126,13 +132,10 @@ impl<T: Trait> Module<T> {
         Ok(())
     }
 
-    fn do_freeze(origin: T::Origin, hash: T::Hash, amount: T::Balance) -> Result {
+    pub fn do_freeze(sender: T::AccountId, hash: T::Hash, amount: T::Balance) -> Result {
         
         let token = Self::token(hash);
         ensure!(token.is_some(), "no matching token found");
-
-        let sender = ensure_signed(origin)?;
-        ensure!(<FreeBalanceOf<T>>::exists((sender.clone(), hash.clone())), "sender does not have the token");
 
         let old_free_amount = Self::free_balance_of((sender.clone(), hash.clone()));
         ensure!(old_free_amount >= amount, "can not freeze more than available tokens");
@@ -148,13 +151,10 @@ impl<T: Trait> Module<T> {
         Ok(())
     }
 
-    fn do_unfreeze(origin: T::Origin, hash: T::Hash, amount: T::Balance) -> Result {
+    pub fn do_unfreeze(sender: T::AccountId, hash: T::Hash, amount: T::Balance) -> Result {
         
         let token = Self::token(hash);
         ensure!(token.is_some(), "no matching token found");
-
-        let sender = ensure_signed(origin)?;
-        ensure!(<FreeBalanceOf<T>>::exists((sender.clone(), hash.clone())), "sender does not have the token");
 
         let old_freezed_amount = Self::freezed_balance_of((sender.clone(), hash.clone()));
         ensure!(old_freezed_amount >= amount, "can not unfreeze more than available tokens");
@@ -166,6 +166,19 @@ impl<T: Trait> Module<T> {
         <FreezedBalanceOf<T>>::insert((sender.clone(), hash.clone()), old_freezed_amount - amount);
 
         Self::deposit_event(RawEvent::UnFreezed(sender, hash, amount));
+
+        Ok(())
+    }
+
+    pub fn ensure_free_balance(sender: T::AccountId, hash: T::Hash, amount: T::Balance) -> Result {
+
+        let token = Self::token(hash);
+        ensure!(token.is_some(), "no matching token found");
+
+        ensure!(<FreeBalanceOf<T>>::exists((sender.clone(), hash.clone())), "sender does not have the token");
+
+        let free_amount = Self::free_balance_of((sender.clone(), hash.clone()));
+        ensure!(free_amount >= amount, "sender does not have enough free balance");
 
         Ok(())
     }

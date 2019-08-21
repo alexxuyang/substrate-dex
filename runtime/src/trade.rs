@@ -1,4 +1,5 @@
-use support::{decl_module, decl_storage, decl_event, StorageValue, StorageMap, dispatch::Result, ensure};
+use support::{decl_module, decl_storage, decl_event, StorageValue, StorageMap, dispatch::Result, ensure, Parameter};
+use runtime_primitives::traits::{SimpleArithmetic, Bounded, Member, Zero};
 use system::ensure_signed;
 use parity_codec::{Encode, Decode};
 use runtime_primitives::traits::{Hash};
@@ -6,9 +7,10 @@ use crate::token;
 
 pub trait Trait: token::Trait + system::Trait {
 	type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
+	type Price: Parameter + Default + Member + Bounded + SimpleArithmetic + Copy;
 }
 
-#[derive(Encode, Decode, Default, Clone, PartialEq, Eq)]
+#[derive(Encode, Decode, Default, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "std", derive(Debug))]
 pub struct TradePair<Hash> {
 	hash: Hash,
@@ -16,10 +18,53 @@ pub struct TradePair<Hash> {
 	quoto: Hash,
 }
 
+#[derive(Encode, Decode, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "std", derive(Debug))]
+pub enum OrderType {
+	Buy,
+	Sell,
+}
+
+#[derive(Encode, Decode, Clone, PartialEq)]
+pub enum OrderStatus {
+	Created,
+	PartialFilled,
+	Filled,
+	Canceled,
+}
+
+static PriceDecimal: u32 = 8;
+
+#[derive(Encode, Decode)]
+pub struct LimitOrder<T> where T: Trait {
+	hash: T::Hash,
+	base: T::Hash,
+	quoto: T::Hash,
+	owner: T::AccountId,
+	price: T::Price,
+	otype: OrderType,
+	status: OrderStatus,
+}
+
+impl<T> LimitOrder<T> where T: Trait {
+	fn new(base: T::Hash, quoto: T::Hash, owner: T::AccountId, price: T::Price, otype: OrderType) -> Self {
+		let hash = (<system::Module<T>>::random_seed(), 
+					<system::Module<T>>::block_number(), 
+					base, quoto, owner.clone(), price, otype)
+			.using_encoded(<T as system::Trait>::Hashing::hash);
+
+		LimitOrder {
+			hash, base, quoto, owner, price, otype, status: OrderStatus::Created
+		}
+	}
+}
+
 decl_storage! {
 	trait Store for Module<T: Trait> as trade {
 		TradePairsByHash get(trade_pair_by_hash): map T::Hash => Option<TradePair<T::Hash>>;
 		TradePairsByBaseQuoto get(trade_pair_by_base_quoto): map (T::Hash, T::Hash) => Option<TradePair<T::Hash>>;
+
+		Orders get(order): map T::Hash => Option<LimitOrder<T>>;
 
 		Nonce: u64;
 	}
@@ -30,9 +75,12 @@ decl_event!(
 	where
 		<T as system::Trait>::AccountId,
 		<T as system::Trait>::Hash,
+		<T as Trait>::Price,
+		<T as balances::Trait>::Balance,
 		TradePair = TradePair<<T as system::Trait>::Hash>,
 	{
 		TradePairCreated(AccountId, Hash, TradePair),
+		OrderCreated(AccountId, Hash, Hash, Hash, Price, Balance), // (alice, orderHash, baseTokenHash, quotoTokenHash, price, balance)
 	}
 );
 
@@ -43,13 +91,47 @@ decl_module! {
 		pub fn create_trade_pair(origin, base: T::Hash, quoto: T::Hash) -> Result {
 			Self::do_create_trade_pair(origin, base, quoto)
 		}
+
+		pub fn create_limit_order(origin, base: T::Hash, quoto: T::Hash, otype: OrderType, price: T::Price, amount: T::Balance) -> Result {
+			let sender = ensure_signed(origin)?;
+
+			ensure!(price > Zero::zero(), "price should be great than zero");
+
+			Self::ensure_trade_pair(base, quoto)?;
+			
+			let op_token_hash;
+			match otype {
+				OrderType::Buy => op_token_hash = base,
+				OrderType::Sell => op_token_hash = quoto,
+			};
+
+			let order = LimitOrder::new(base, quoto, sender.clone(), price, otype);
+			let hash  = order.hash;
+
+			<token::Module<T>>::do_freeze(sender.clone(), op_token_hash, amount)?;
+			<token::Module<T>>::ensure_free_balance(sender.clone(), op_token_hash, amount)?;
+			<Orders<T>>::insert(hash, order);
+
+			Self::deposit_event(RawEvent::OrderCreated(sender.clone(), hash, base, quoto, price, amount));
+
+			Ok(())
+		}
 	}
 }
 
 impl<T: Trait> Module<T> {
+	fn ensure_trade_pair(base: T::Hash, quoto: T::Hash) -> Result {
+		let bq = Self::trade_pair_by_base_quoto((base, quoto));
+		ensure!(bq.is_some(), "not trade pair with base & quoto");
+
+		Ok(())
+	}
+
 	fn do_create_trade_pair(origin: T::Origin, base: T::Hash, quoto: T::Hash) -> Result {
 		let sender = ensure_signed(origin)?;
 		
+		ensure!(base != quoto, "base and quoto can not be the same token");
+
 		let base_owner = <token::Module<T>>::owner(base);
 		let quoto_owner = <token::Module<T>>::owner(quoto);
 

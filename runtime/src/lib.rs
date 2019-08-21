@@ -199,6 +199,7 @@ impl token::Trait for Runtime {
 
 impl trade::Trait for Runtime {
 	type Event = Event;
+	type Price = u64;
 }
 
 construct_runtime!(

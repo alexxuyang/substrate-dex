@@ -1,7 +1,23 @@
 {
-    "Token": {
-      "hash": "H256",
-      "symbol": "Vec<u8>",
-      "total_supply": "Balance"
-    }
+  "Token": {
+    "hash": "H256",
+    "symbol": "Vec<u8>",
+    "total_supply": "Balance"
+  },
+  "TradePair": {
+    "hash": "H256",
+    "base": "H256",
+    "quoto": "H256"
+  },
+  "Price": "u64",
+  "OrderType": "u8",
+  "LimitOrder": {
+  	"hash": "H256",
+  	"base": "H256",
+  	"quoto": "H256",
+  	"owner": "AccountId",
+  	"price": "u64",
+  	"otype": "u64",
+  	"status": "u64"
   }
+}
