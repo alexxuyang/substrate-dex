@@ -3,6 +3,8 @@ use runtime_primitives::traits::{SimpleArithmetic, Bounded, Member, Zero};
 use system::ensure_signed;
 use parity_codec::{Encode, Decode};
 use runtime_primitives::traits::{Hash};
+use rstd::result;
+use rstd::prelude::*;
 use crate::token;
 
 pub trait Trait: token::Trait + system::Trait {
@@ -68,6 +70,9 @@ decl_storage! {
 		OwnedOrders get(owned_orders): map (T::AccountId, u64) => Option<T::Hash>;
 		OwnedOrdersIndex get(owned_orders_index): map T::AccountId => u64;
 
+		TradePairOwnedOrders get(trade_pair_owned_orders): map (T::Hash, u64) => Option<T::Hash>;
+		TradePairOwnedOrdersIndex get(trade_pair_owned_orders_index): map T::Hash => u64;
+
 		Nonce: u64;
 	}
 }
@@ -96,10 +101,9 @@ decl_module! {
 
 		pub fn create_limit_order(origin, base: T::Hash, quoto: T::Hash, otype: OrderType, price: T::Price, amount: T::Balance) -> Result {
 			let sender = ensure_signed(origin)?;
+			let tp = Self::ensure_trade_pair(base, quoto)?;
 
 			ensure!(price > Zero::zero(), "price should be great than zero");
-
-			Self::ensure_trade_pair(base, quoto)?;
 			
 			let op_token_hash;
 			match otype {
@@ -118,6 +122,10 @@ decl_module! {
 			<OwnedOrders<T>>::insert((sender.clone(), owned_index), hash);
 			<OwnedOrdersIndex<T>>::insert(sender.clone(), owned_index + 1);
 
+			let tp_owned_index = Self::trade_pair_owned_orders_index(tp.hash);
+			<TradePairOwnedOrders<T>>::insert((tp.hash, tp_owned_index), hash);
+			<TradePairOwnedOrdersIndex<T>>::insert(tp.hash, tp_owned_index + 1);
+
 			Self::deposit_event(RawEvent::OrderCreated(sender.clone(), hash, base, quoto, price, amount));
 
 			Ok(())
@@ -135,11 +143,18 @@ impl<T: Trait> Module<T> {
 		}
 	}
 
-	fn ensure_trade_pair(base: T::Hash, quoto: T::Hash) -> Result {
+	fn ensure_trade_pair(base: T::Hash, quoto: T::Hash) -> result::Result<TradePair<T::Hash>, &'static str> {
 		let bq = Self::get_trade_pair_by_base_quoto(base, quoto);
 		ensure!(bq.is_some(), "not trade pair with base & quoto");
 
-		Ok(())
+		match bq {
+			Some(bq) => {
+				return Ok(bq)
+			},
+			None => {
+				return Err("not trade pair with base & quoto")
+			},
+		}
 	}
 
 	fn do_create_trade_pair(origin: T::Origin, base: T::Hash, quoto: T::Hash) -> Result {
