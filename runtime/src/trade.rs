@@ -6,6 +6,7 @@ use runtime_primitives::traits::{Hash};
 use rstd::result;
 use rstd::prelude::*;
 use crate::token;
+use crate::linked_item::{LinkedItem, LinkedList};
 
 pub trait Trait: token::Trait + system::Trait {
 	type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
@@ -37,6 +38,10 @@ pub enum OrderStatus {
 
 static PriceDecimal: u32 = 8;
 
+pub trait LimitOrderT<T> where T: Trait {
+	fn is_filled(&self) -> bool;
+}
+
 #[derive(Encode, Decode)]
 pub struct LimitOrder<T> where T: Trait {
 	hash: T::Hash,
@@ -44,34 +49,46 @@ pub struct LimitOrder<T> where T: Trait {
 	quoto: T::Hash,
 	owner: T::AccountId,
 	price: T::Price,
+	amount: T::Balance,
+	remained_amount: T::Balance,
 	otype: OrderType,
 	status: OrderStatus,
 }
 
+impl<T> LimitOrderT<T> for LimitOrder<T> where T: Trait {
+	fn is_filled(&self) -> bool {
+		(self.remained_amount == Zero::zero() && self.status == OrderStatus::Filled) || self.status == OrderStatus::PartialFilled
+	}
+}
+
 impl<T> LimitOrder<T> where T: Trait {
-	fn new(base: T::Hash, quoto: T::Hash, owner: T::AccountId, price: T::Price, otype: OrderType) -> Self {
+	fn new(base: T::Hash, quoto: T::Hash, owner: T::AccountId, price: T::Price, amount: T::Balance, otype: OrderType) -> Self {
 		let hash = (<system::Module<T>>::random_seed(), 
 					<system::Module<T>>::block_number(), 
 					base, quoto, owner.clone(), price, otype)
 			.using_encoded(<T as system::Trait>::Hashing::hash);
 
 		LimitOrder {
-			hash, base, quoto, owner, price, otype, status: OrderStatus::Created
+			hash, base, quoto, owner, price, otype, amount, status: OrderStatus::Created, remained_amount: amount,
 		}
 	}
 }
 
+type OrderLinkedItem<T> = LinkedItem<<T as Trait>::Price, <T as system::Trait>::Hash>;
+
 decl_storage! {
 	trait Store for Module<T: Trait> as trade {
-		TradePairsByHash get(trade_pair_by_hash): map T::Hash => Option<TradePair<T::Hash>>;
-		TradePairsHashByBaseQuoto get(trade_pair_hash_by_base_quoto): map (T::Hash, T::Hash) => Option<T::Hash>;
+		TradePairsByHash get(trade_pair_by_hash): map T::Hash => Option<TradePair<T::Hash>>;	///	TradePairHash => TradePair
+		TradePairsHashByBaseQuoto get(trade_pair_hash_by_base_quoto): map (T::Hash, T::Hash) => Option<T::Hash>;	/// (BaseTokenHash, QuotoTokenHash) => TradePairHash
 
-		Orders get(order): map T::Hash => Option<LimitOrder<T>>;
-		OwnedOrders get(owned_orders): map (T::AccountId, u64) => Option<T::Hash>;
-		OwnedOrdersIndex get(owned_orders_index): map T::AccountId => u64;
+		Orders get(order): map T::Hash => Option<LimitOrder<T>>;	/// OrderHash => Order
+		OwnedOrders get(owned_orders): map (T::AccountId, u64) => Option<T::Hash>;	/// (AccoundId, Index) => OrderHash
+		OwnedOrdersIndex get(owned_orders_index): map T::AccountId => u64;	///	AccountId => Index
 
-		TradePairOwnedOrders get(trade_pair_owned_orders): map (T::Hash, u64) => Option<T::Hash>;
-		TradePairOwnedOrdersIndex get(trade_pair_owned_orders_index): map T::Hash => u64;
+		TradePairOwnedOrders get(trade_pair_owned_order): map (T::Hash, u64) => Option<T::Hash>;	///	(TradePairHash, Index) => OrderHash
+		TradePairOwnedOrdersIndex get(trade_pair_owned_order_index): map T::Hash => u64;	///	TradePairHash => Index
+
+		SellOrders get(sell_order): map (T::Hash, T::Price) => Option<OrderLinkedItem<T>>;	/// (TradePairHash, Price) => OrderLinkedItem
 
 		Nonce: u64;
 	}
@@ -111,7 +128,7 @@ decl_module! {
 				OrderType::Sell => op_token_hash = quoto,
 			};
 
-			let order = LimitOrder::new(base, quoto, sender.clone(), price, otype);
+			let order = LimitOrder::new(base, quoto, sender.clone(), price, amount, otype);
 			let hash  = order.hash;
 
 			<token::Module<T>>::do_freeze(sender.clone(), op_token_hash, amount)?;
@@ -122,7 +139,7 @@ decl_module! {
 			<OwnedOrders<T>>::insert((sender.clone(), owned_index), hash);
 			<OwnedOrdersIndex<T>>::insert(sender.clone(), owned_index + 1);
 
-			let tp_owned_index = Self::trade_pair_owned_orders_index(tp.hash);
+			let tp_owned_index = Self::trade_pair_owned_order_index(tp.hash);
 			<TradePairOwnedOrders<T>>::insert((tp.hash, tp_owned_index), hash);
 			<TradePairOwnedOrdersIndex<T>>::insert(tp.hash, tp_owned_index + 1);
 
