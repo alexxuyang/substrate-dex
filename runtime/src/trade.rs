@@ -6,14 +6,13 @@ use runtime_primitives::traits::{Hash};
 use rstd::result;
 use rstd::prelude::*;
 use crate::token;
-use crate::linked_item::{LinkedItem, LinkedList};
 
 pub trait Trait: token::Trait + system::Trait {
 	type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
 	type Price: Parameter + Default + Member + Bounded + SimpleArithmetic + Copy;
 }
 
-#[derive(Encode, Decode, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Encode, Decode, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "std", derive(Debug))]
 pub struct TradePair<Hash> {
 	hash: Hash,
@@ -29,6 +28,7 @@ pub enum OrderType {
 }
 
 #[derive(Encode, Decode, Clone, PartialEq)]
+#[cfg_attr(feature = "std", derive(Debug))]
 pub enum OrderStatus {
 	Created,
 	PartialFilled,
@@ -36,13 +36,8 @@ pub enum OrderStatus {
 	Canceled,
 }
 
-static PriceDecimal: u32 = 8;
-
-pub trait LimitOrderT<T> where T: Trait {
-	fn is_filled(&self) -> bool;
-}
-
-#[derive(Encode, Decode)]
+#[derive(Encode, Decode, Clone, PartialEq)]
+#[cfg_attr(feature = "std", derive(Debug))]
 pub struct LimitOrder<T> where T: Trait {
 	hash: T::Hash,
 	base: T::Hash,
@@ -53,6 +48,10 @@ pub struct LimitOrder<T> where T: Trait {
 	remained_amount: T::Balance,
 	otype: OrderType,
 	status: OrderStatus,
+}
+
+pub trait LimitOrderT<T> where T: Trait {
+	fn is_filled(&self) -> bool;
 }
 
 impl<T> LimitOrderT<T> for LimitOrder<T> where T: Trait {
@@ -74,8 +73,6 @@ impl<T> LimitOrder<T> where T: Trait {
 	}
 }
 
-type OrderLinkedItem<T> = LinkedItem<<T as Trait>::Price, <T as system::Trait>::Hash>;
-
 decl_storage! {
 	trait Store for Module<T: Trait> as trade {
 		TradePairsByHash get(trade_pair_by_hash): map T::Hash => Option<TradePair<T::Hash>>;	///	TradePairHash => TradePair
@@ -88,10 +85,155 @@ decl_storage! {
 		TradePairOwnedOrders get(trade_pair_owned_order): map (T::Hash, u64) => Option<T::Hash>;	///	(TradePairHash, Index) => OrderHash
 		TradePairOwnedOrdersIndex get(trade_pair_owned_order_index): map T::Hash => u64;	///	TradePairHash => Index
 
-		SellOrders get(sell_order): map (T::Hash, T::Price) => Option<OrderLinkedItem<T>>;	/// (TradePairHash, Price) => OrderLinkedItem
+		SellOrders get(sell_order): map (T::Hash, Option<T::Price>) => Option<LinkedItem<T>>;	/// (TradePairHash, Price) => LinkedItem
 
 		Nonce: u64;
 	}
+}
+
+#[derive(Encode, Decode, Clone)]
+#[cfg_attr(feature="std", derive(PartialEq, Eq, Debug))]
+pub struct LinkedItem<T> where T: Trait
+{
+    pub prev: Option<T::Price>,
+    pub next: Option<T::Price>,
+    pub price: Option<T::Price>,
+    pub orders: Vec<T::Hash>, // remove the item at 0 index will caused performance issue, should be optimized
+}
+
+///             LinkedItem              LinkedItem              LinkedItem              LinkedItem
+///             Head                    Item1                   Item2                   Item3
+///             Price:None  <--------   Prev                    Next       -------->    Price 20
+///             Next        -------->   Price: 5   <--------    Prev                    Next        -------->   Price: None
+///   20 <----  Prev                    Next       -------->    Price 10   <--------    Prev
+///                                     Orders
+///                                     o1: Hash -> sell 20 A at price 5
+///                                     o2: Hash -> sell 1 A at price 5
+///                                     o3: Hash -> sell 5 A at price 5
+///                                     o4: Hash -> sell 200 A at price 5
+///                                     o5: Hash -> sell 10 A at price 5
+///                                     when do order matching, o1 will match before o2 and so on
+
+/// Self: StorageMap, Key1: TradePairHash, Key2: Price, Value: OrderHash
+impl<T: Trait> SellOrders<T> {
+    pub fn read_head(key: T::Hash) -> LinkedItem<T> {
+        Self::read(key, None)
+    }
+
+    pub fn read(key1: T::Hash, key2: Option<T::Price>) -> LinkedItem<T> {
+        Self::get(&(key1, key2)).unwrap_or_else(|| LinkedItem {
+            prev: None,
+            next: None,
+            price: None,
+            orders: Vec::new(),
+        })
+    }
+
+    pub fn write(key1: T::Hash, key2: Option<T::Price>, item: LinkedItem<T>) {
+        Self::insert(&(key1, key2), item);
+    }
+
+    pub fn append(key1: T::Hash, key2: T::Price, value: T::Hash) {
+
+        let item = Self::get(&(key1, Some(key2)));
+        match item {
+            Some(mut item) => {
+                item.orders.push(value);
+                return
+            },
+            None => {
+                let mut item = Self::read_head(key1);
+                while let Some(price) = item.next {
+                    if key2 < price {
+                        item = Self::read(key1, item.next);
+                    }
+                }
+
+                // add key2 after item
+                // item(new_prev) -> key2 -> item.next(new_next)
+
+                // update new_prev
+                let new_prev = LinkedItem {
+                    next: Some(key2), 
+                    ..item
+                };
+                Self::write(key1, new_prev.price, new_prev.clone());
+
+                // update new_next
+                let next = Self::read(key1, item.next);
+                let new_next = LinkedItem {
+                    prev: Some(key2),
+                    ..next
+                };
+                Self::write(key1, new_next.price, new_next.clone());
+
+                // update key2
+                let mut v = Vec::new();
+                v.push(value);
+                let item = LinkedItem {
+                    prev: new_prev.price,
+                    next: new_next.price,
+                    orders: v,
+                    price: Some(key2),
+                };
+                Self::write(key1, Some(key2), item);
+            }
+        };
+    }
+
+    pub fn remove_key2(key1: T::Hash, key2: T::Price) {
+        let item = Self::get(&(key1.clone(), Some(key2)));
+        match item {
+            Some(item) => {
+                if item.orders.len() != 0 {
+                    return
+                }
+            },
+            None => return,
+        };
+
+        if let Some(item) = Self::take(&(key1.clone(), Some(key2))) {
+            Self::mutate((key1.clone(), item.prev), |x| {
+                if let Some(x) = x {
+                    x.next = item.next;
+                }
+            });
+
+            Self::mutate((key1.clone(), item.next), |x| {
+                if let Some(x) = x {
+                    x.prev = item.prev;
+                }
+            });
+        }
+    }
+
+    /// when we do order match, the first order in LinkedItem will match first
+    /// and if this order's remained_amount is zero, then it should be remove from the list
+    pub fn remove_value(key1: T::Hash, key2: T::Price) -> Result {
+        let item = Self::get(&(key1.clone(), Some(key2)));
+        match item {
+            Some(mut item) => {
+                ensure!(item.orders.len() > 0, "there is no order when we want to remove it");
+
+                let order_hash = item.orders.get(0);
+                ensure!(order_hash.is_some(), "can not get order from index 0 when we want to remove it");
+
+                let order_hash = order_hash.unwrap();
+				let order = <Orders<T>>::get(order_hash);
+				ensure!(order.is_some(), "can not get order from index 0 when we want to remove it");
+				
+				let order = order.unwrap();
+                ensure!(order.is_filled(), "try to remove not filled order");
+
+                item.orders.remove(0);
+
+                Self::write(key1, Some(key2), item);
+
+                Ok(())
+            },
+            None => Err("try to remove order but the order list is NOT FOUND")
+        }
+    }
 }
 
 decl_event!(
