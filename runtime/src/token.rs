@@ -38,6 +38,9 @@ decl_storage! {
         FreeBalanceOf get(free_balance_of): map (T::AccountId, T::Hash) => T::Balance;
         FreezedBalanceOf get(freezed_balance_of): map (T::AccountId, T::Hash) => T::Balance;
 
+		OwnedTokens get(owned_token): map (T::AccountId, u64) => Option<T::Hash>;
+		OwnedTokensIndex get(owned_token_index): map T::AccountId => u64;
+
         Nonce: u64;
     }
 }
@@ -92,6 +95,10 @@ impl<T: Trait> Module<T> {
         <Owners<T>>::insert(hash.clone(), sender.clone());
         <BalanceOf<T>>::insert((sender.clone(), hash.clone()), total_supply);
         <FreeBalanceOf<T>>::insert((sender.clone(), hash.clone()), total_supply);
+
+		let owned_token_index = <OwnedTokensIndex<T>>::get(sender.clone());
+		<OwnedTokens<T>>::insert((sender.clone(), owned_token_index), hash);
+		<OwnedTokensIndex<T>>::insert(sender.clone(), owned_token_index + 1);
 
         Self::deposit_event(RawEvent::Issued(sender, hash.clone(), total_supply));
 
@@ -182,4 +189,108 @@ impl<T: Trait> Module<T> {
 
         Ok(())
     }
+}
+
+/// tests for this module
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	use runtime_io::with_externalities;
+	use primitives::{H256, Blake2Hasher};
+	use support::{impl_outer_origin, assert_ok, assert_err};
+	use runtime_primitives::{
+		BuildStorage,
+		traits::{BlakeTwo256, IdentityLookup},
+		testing::{Digest, DigestItem, Header}
+	};
+
+	impl_outer_origin! {
+		pub enum Origin for Test {}
+	}
+
+	// For testing the module, we construct most of a mock runtime. This means
+	// first constructing a configuration type (`Test`) which `impl`s each of the
+	// configuration traits of modules we want to use.
+	#[derive(Clone, Eq, PartialEq)]
+	pub struct Test;
+	impl system::Trait for Test {
+		type Origin = Origin;
+		type Index = u64;
+		type BlockNumber = u64;
+		type Hash = H256;
+		type Hashing = BlakeTwo256;
+		type Digest = Digest;
+		type AccountId = u64;
+		type Lookup = IdentityLookup<Self::AccountId>;
+		type Header = Header;
+		type Event = ();
+		type Log = DigestItem;
+	}
+
+	impl balances::Trait for Test {
+		type Balance = u128;
+
+		type OnFreeBalanceZero = ();
+
+		type OnNewAccount = ();
+
+		type Event = ();
+
+		type TransactionPayment = ();
+		type DustRemoval = ();
+		type TransferPayment = ();
+	}
+
+	impl super::Trait for Test {
+		type Event = ();
+	}
+
+	type TokenModule = super::Module<Test>;
+
+	// This function basically just builds a genesis storage key/value store according to
+	// our desired mockup.
+	fn new_test_ext() -> runtime_io::TestExternalities<Blake2Hasher> {
+		system::GenesisConfig::<Test>::default().build_storage().unwrap().0.into()
+	}
+
+	#[test]
+	fn token_related_test() {
+		with_externalities(&mut new_test_ext(), || {
+			let ok: Result = Ok(());
+			assert_ok!(ok);
+			assert_eq!(1u32, 1);
+			assert!(true);
+
+			let ALICE = 10u64;
+			let BOB = 20u64;
+			let CHARLIE = 30u64;
+
+			assert_ok!(TokenModule::issue(Origin::signed(ALICE), b"6688".to_vec(), 21000000));
+			assert_eq!(TokenModule::owned_token_index(ALICE), 1);
+
+			let token_hash = TokenModule::owned_token((ALICE, 0));
+			assert!(token_hash.is_some());
+			let token_hash = token_hash.unwrap();
+			let token = TokenModule::token(token_hash);
+			assert!(token.is_some());
+			let token = token.unwrap();
+
+			assert_eq!(TokenModule::balance_of((ALICE, token.hash)), 21000000);
+			assert_eq!(TokenModule::free_balance_of((ALICE, token.hash)), 21000000);
+			assert_eq!(TokenModule::freezed_balance_of((ALICE, token.hash)), 0);
+
+			assert_ok!(TokenModule::transfer(Origin::signed(ALICE), token.hash, BOB, 100));
+			assert_eq!(TokenModule::balance_of((ALICE, token.hash)), 20999900);
+			assert_eq!(TokenModule::free_balance_of((ALICE, token.hash)), 20999900);
+			assert_eq!(TokenModule::freezed_balance_of((ALICE, token.hash)), 0);
+			assert_eq!(TokenModule::balance_of((BOB, token.hash)), 100);
+			assert_eq!(TokenModule::free_balance_of((BOB, token.hash)), 100);
+			assert_eq!(TokenModule::freezed_balance_of((BOB, token.hash)), 0);
+
+			assert_err!(TokenModule::transfer(Origin::signed(BOB), H256::from_low_u64_be(2), CHARLIE, 101), "no matching token found");
+			assert_err!(TokenModule::transfer(Origin::signed(CHARLIE), token.hash, BOB, 101), "sender does not have the token");
+			assert_err!(TokenModule::transfer(Origin::signed(BOB), token.hash, CHARLIE, 101), "sender does not have enough balance");
+		});
+	}
 }

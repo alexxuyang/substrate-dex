@@ -410,13 +410,13 @@ mod tests {
 		type Event = ();
 	}
 
-	impl Trait for Test {
+	impl super::Trait for Test {
 		type Event = ();
 		type Price = u64;
 	}
 
-	type TradeModule = Module<Test>;
-	type SellOrders = TradeModule<Test>;
+	type TokenModule = token::Module<Test>;
+	type TradeModule = super::Module<Test>;
 
 	// This function basically just builds a genesis storage key/value store according to
 	// our desired mockup.
@@ -431,7 +431,7 @@ mod tests {
 			assert_ok!(ok);
 			assert_eq!(1u32, 1);
 
-			let token1 = 
+			// let token1 = 
 		});
 	}
 }
