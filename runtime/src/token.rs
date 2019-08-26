@@ -7,9 +7,9 @@ use rstd::prelude::Vec;
 #[derive(Encode, Decode, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "std", derive(Debug))]
 pub struct Token<Hash, Balance> {
-    hash: Hash,
-    symbol: Vec<u8>,
-    total_supply: Balance,
+    pub hash: Hash,
+    pub symbol: Vec<u8>,
+    pub total_supply: Balance,
 }
 
 pub trait Trait: balances::Trait {
@@ -255,7 +255,7 @@ mod tests {
 	}
 
 	#[test]
-	fn token_related_test() {
+	fn token_related_test_case() {
 		with_externalities(&mut new_test_ext(), || {
 			let ok: Result = Ok(());
 			assert_ok!(ok);

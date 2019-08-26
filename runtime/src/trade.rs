@@ -17,7 +17,7 @@ pub trait Trait: token::Trait + system::Trait {
 pub struct TradePair<Hash> {
 	hash: Hash,
 	base: Hash,
-	quoto: Hash,
+	quote: Hash,
 }
 
 #[derive(Encode, Decode, Clone, Copy, PartialEq)]
@@ -41,7 +41,7 @@ pub enum OrderStatus {
 pub struct LimitOrder<T> where T: Trait {
 	hash: T::Hash,
 	base: T::Hash,
-	quoto: T::Hash,
+	quote: T::Hash,
 	owner: T::AccountId,
 	price: T::Price,
 	amount: T::Balance,
@@ -61,14 +61,14 @@ impl<T> LimitOrderT<T> for LimitOrder<T> where T: Trait {
 }
 
 impl<T> LimitOrder<T> where T: Trait {
-	fn new(base: T::Hash, quoto: T::Hash, owner: T::AccountId, price: T::Price, amount: T::Balance, otype: OrderType) -> Self {
+	fn new(base: T::Hash, quote: T::Hash, owner: T::AccountId, price: T::Price, amount: T::Balance, otype: OrderType) -> Self {
 		let hash = (<system::Module<T>>::random_seed(), 
 					<system::Module<T>>::block_number(), 
-					base, quoto, owner.clone(), price, otype)
+					base, quote, owner.clone(), price, otype)
 			.using_encoded(<T as system::Trait>::Hashing::hash);
 
 		LimitOrder {
-			hash, base, quoto, owner, price, otype, amount, status: OrderStatus::Created, remained_amount: amount,
+			hash, base, quote, owner, price, otype, amount, status: OrderStatus::Created, remained_amount: amount,
 		}
 	}
 }
@@ -76,7 +76,7 @@ impl<T> LimitOrder<T> where T: Trait {
 decl_storage! {
 	trait Store for Module<T: Trait> as trade {
 		TradePairsByHash get(trade_pair_by_hash): map T::Hash => Option<TradePair<T::Hash>>;	///	TradePairHash => TradePair
-		TradePairsHashByBaseQuoto get(trade_pair_hash_by_base_quoto): map (T::Hash, T::Hash) => Option<T::Hash>;	/// (BaseTokenHash, QuotoTokenHash) => TradePairHash
+		TradePairsHashByBasequote get(trade_pair_hash_by_base_quote): map (T::Hash, T::Hash) => Option<T::Hash>;	/// (BaseTokenHash, quoteTokenHash) => TradePairHash
 
 		Orders get(order): map T::Hash => Option<LimitOrder<T>>;	/// OrderHash => Order
 		OwnedOrders get(owned_orders): map (T::AccountId, u64) => Option<T::Hash>;	/// (AccoundId, Index) => OrderHash
@@ -246,7 +246,7 @@ decl_event!(
 		TradePair = TradePair<<T as system::Trait>::Hash>,
 	{
 		TradePairCreated(AccountId, Hash, TradePair),
-		OrderCreated(AccountId, Hash, Hash, Hash, Price, Balance), // (alice, orderHash, baseTokenHash, quotoTokenHash, price, balance)
+		OrderCreated(AccountId, Hash, Hash, Hash, Price, Balance), // (alice, orderHash, baseTokenHash, quoteTokenHash, price, balance)
 	}
 );
 
@@ -254,23 +254,23 @@ decl_module! {
 	pub struct Module<T: Trait> for enum Call where origin: T::Origin {
 		fn deposit_event<T>() = default;
 
-		pub fn create_trade_pair(origin, base: T::Hash, quoto: T::Hash) -> Result {
-			Self::do_create_trade_pair(origin, base, quoto)
+		pub fn create_trade_pair(origin, base: T::Hash, quote: T::Hash) -> Result {
+			Self::do_create_trade_pair(origin, base, quote)
 		}
 
-		pub fn create_limit_order(origin, base: T::Hash, quoto: T::Hash, otype: OrderType, price: T::Price, amount: T::Balance) -> Result {
+		pub fn create_limit_order(origin, base: T::Hash, quote: T::Hash, otype: OrderType, price: T::Price, amount: T::Balance) -> Result {
 			let sender = ensure_signed(origin)?;
-			let tp = Self::ensure_trade_pair(base, quoto)?;
+			let tp = Self::ensure_trade_pair(base, quote)?;
 
 			ensure!(price > Zero::zero(), "price should be great than zero");
 			
 			let op_token_hash;
 			match otype {
 				OrderType::Buy => op_token_hash = base,
-				OrderType::Sell => op_token_hash = quoto,
+				OrderType::Sell => op_token_hash = quote,
 			};
 
-			let order = LimitOrder::new(base, quoto, sender.clone(), price, amount, otype);
+			let order = LimitOrder::new(base, quote, sender.clone(), price, amount, otype);
 			let hash  = order.hash;
 
 			<token::Module<T>>::do_freeze(sender.clone(), op_token_hash, amount)?;
@@ -285,7 +285,7 @@ decl_module! {
 			<TradePairOwnedOrders<T>>::insert((tp.hash, tp_owned_index), hash);
 			<TradePairOwnedOrdersIndex<T>>::insert(tp.hash, tp_owned_index + 1);
 
-			Self::deposit_event(RawEvent::OrderCreated(sender.clone(), hash, base, quoto, price, amount));
+			Self::deposit_event(RawEvent::OrderCreated(sender.clone(), hash, base, quote, price, amount));
 
 			Ok(())
 		}
@@ -293,8 +293,8 @@ decl_module! {
 }
 
 impl<T: Trait> Module<T> {
-	fn get_trade_pair_by_base_quoto(base: T::Hash, quoto: T::Hash) -> Option<TradePair<T::Hash>> {
-		let hash = Self::trade_pair_hash_by_base_quoto((base, quoto));
+	fn get_trade_pair_by_base_quote(base: T::Hash, quote: T::Hash) -> Option<TradePair<T::Hash>> {
+		let hash = Self::trade_pair_hash_by_base_quote((base, quote));
 
 		match hash {
 			Some(h) => Self::trade_pair_by_hash(h),
@@ -302,52 +302,52 @@ impl<T: Trait> Module<T> {
 		}
 	}
 
-	fn ensure_trade_pair(base: T::Hash, quoto: T::Hash) -> result::Result<TradePair<T::Hash>, &'static str> {
-		let bq = Self::get_trade_pair_by_base_quoto(base, quoto);
-		ensure!(bq.is_some(), "not trade pair with base & quoto");
+	fn ensure_trade_pair(base: T::Hash, quote: T::Hash) -> result::Result<TradePair<T::Hash>, &'static str> {
+		let bq = Self::get_trade_pair_by_base_quote(base, quote);
+		ensure!(bq.is_some(), "not trade pair with base & quote");
 
 		match bq {
 			Some(bq) => {
 				return Ok(bq)
 			},
 			None => {
-				return Err("not trade pair with base & quoto")
+				return Err("not trade pair with base & quote")
 			},
 		}
 	}
 
-	fn do_create_trade_pair(origin: T::Origin, base: T::Hash, quoto: T::Hash) -> Result {
+	fn do_create_trade_pair(origin: T::Origin, base: T::Hash, quote: T::Hash) -> Result {
 		let sender = ensure_signed(origin)?;
 		
-		ensure!(base != quoto, "base and quoto can not be the same token");
+		ensure!(base != quote, "base and quote can not be the same token");
 
 		let base_owner = <token::Module<T>>::owner(base);
-		let quoto_owner = <token::Module<T>>::owner(quoto);
+		let quote_owner = <token::Module<T>>::owner(quote);
 
-		ensure!(base_owner.is_some() && quoto_owner.is_some(), "can't find owner of base or quoto token");
+		ensure!(base_owner.is_some() && quote_owner.is_some(), "can't find owner of base or quote token");
 
 		let base_owner = base_owner.unwrap();
-		let quoto_owner = quoto_owner.unwrap();
+		let quote_owner = quote_owner.unwrap();
 		
-		ensure!(sender == base_owner || sender == quoto_owner, "sender should be equal to owner of base or quoto token");
+		ensure!(sender == base_owner || sender == quote_owner, "sender should be equal to owner of base or quote token");
 
-		let bq = Self::get_trade_pair_by_base_quoto(base, quoto);
-		let qb = Self::get_trade_pair_by_base_quoto(quoto, base);
+		let bq = Self::get_trade_pair_by_base_quote(base, quote);
+		let qb = Self::get_trade_pair_by_base_quote(quote, base);
 
 		ensure!(!bq.is_some() && !qb.is_some(), "the same trade pair already exists");
 
 		let nonce = <Nonce<T>>::get();
 
-		let hash = (<system::Module<T>>::random_seed(), <system::Module<T>>::block_number(), sender.clone(), base, quoto, nonce)
+		let hash = (<system::Module<T>>::random_seed(), <system::Module<T>>::block_number(), sender.clone(), base, quote, nonce)
 			.using_encoded(<T as system::Trait>::Hashing::hash);
 
 		let tp = TradePair {
-			hash, base, quoto
+			hash, base, quote
 		};
 
 		<Nonce<T>>::mutate(|n| *n += 1);
 		<TradePairsByHash<T>>::insert(hash, tp.clone());
-		<TradePairsHashByBaseQuoto<T>>::insert((base, quoto), hash);
+		<TradePairsHashByBasequote<T>>::insert((base, quote), hash);
 
 		Self::deposit_event(RawEvent::TradePairCreated(sender, hash, tp));
 
@@ -362,7 +362,7 @@ mod tests {
 
 	use runtime_io::with_externalities;
 	use primitives::{H256, Blake2Hasher};
-	use support::{impl_outer_origin, assert_ok};
+	use support::{impl_outer_origin, assert_ok, assert_err};
 	use runtime_primitives::{
 		BuildStorage,
 		traits::{BlakeTwo256, IdentityLookup},
@@ -425,13 +425,88 @@ mod tests {
 	}
 
 	#[test]
-	fn it_works_for_default_value() {
+	fn trade_related_test_case() {
 		with_externalities(&mut new_test_ext(), || {
-			let ok: Result = Ok(());
-			assert_ok!(ok);
-			assert_eq!(1u32, 1);
+			let ALICE = 10u64;
+			let BOB = 20u64;
+			let CHARLIE = 30u64;
 
-			// let token1 = 
+			// token1
+			assert_ok!(TokenModule::issue(Origin::signed(ALICE), b"6677".to_vec(), 21000000));
+			assert_eq!(TokenModule::owned_token_index(ALICE), 1);
+
+			let token_hash = TokenModule::owned_token((ALICE, 0));
+			assert!(token_hash.is_some());
+			let token_hash = token_hash.unwrap();
+			let token1 = TokenModule::token(token_hash);
+			assert!(token1.is_some());
+			let token1 = token1.unwrap();
+
+			assert_eq!(TokenModule::balance_of((ALICE, token1.hash)), 21000000);
+			assert_eq!(TokenModule::free_balance_of((ALICE, token1.hash)), 21000000);
+			assert_eq!(TokenModule::freezed_balance_of((ALICE, token1.hash)), 0);
+
+			// token2
+			assert_ok!(TokenModule::issue(Origin::signed(BOB), b"8899".to_vec(), 10000000));
+			assert_eq!(TokenModule::owned_token_index(BOB), 1);
+
+			let token_hash = TokenModule::owned_token((BOB, 0));
+			assert!(token_hash.is_some());
+			let token_hash = token_hash.unwrap();
+			let token2 = TokenModule::token(token_hash);
+			assert!(token2.is_some());
+			let token2 = token2.unwrap();
+
+			assert_eq!(TokenModule::balance_of((BOB, token2.hash)), 10000000);
+			assert_eq!(TokenModule::free_balance_of((BOB, token2.hash)), 10000000);
+			assert_eq!(TokenModule::freezed_balance_of((BOB, token2.hash)), 0);
+
+			// trade pair
+			let base = token1.hash;
+			let quote = token2.hash;
+
+			assert_ok!(TradeModule::create_trade_pair(Origin::signed(ALICE), base, quote));
+			let tp_hash = TradeModule::trade_pair_hash_by_base_quote((base, quote));
+			assert!(tp_hash.is_some());
+			let tp_hash = tp_hash.unwrap();
+			let tp = TradeModule::trade_pair_by_hash(tp_hash);
+			assert!(tp.is_some());
+			let tp = tp.unwrap();
+
+			assert!(tp.base == base);
+			assert!(tp.quote == quote);
+
+			// limit order
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(ALICE), base, quote, OrderType::Buy, 1, 100));
+			let index = TradeModule::owned_orders_index(ALICE);
+			let order_hash = TradeModule::owned_orders((ALICE, index - 1));
+			assert!(order_hash.is_some());
+			let order_hash = order_hash.unwrap();
+			let order = TradeModule::order(order_hash);
+			assert!(order.is_some());
+			let order = order.unwrap();
+			let o = LimitOrder {
+				base, quote, 
+				amount: 100,
+				otype: OrderType::Buy,
+				price: 1,
+				remained_amount: 100,
+				status: OrderStatus::Created,
+				owner: ALICE,
+				hash: order_hash,
+			};
+			assert!(order == o);
+
+			let index = TradeModule::trade_pair_owned_order_index(tp.hash);
+			let order_hash = TradeModule::trade_pair_owned_order((tp.hash, index - 1));
+			assert!(order_hash.is_some());
+			let order_hash = order_hash.unwrap();
+			let order = TradeModule::order(order_hash);
+			assert!(order.is_some());
+			let order = order.unwrap();
+			assert!(order == o);
+
+			
 		});
 	}
 }
