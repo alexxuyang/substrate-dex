@@ -416,6 +416,7 @@ mod tests {
 	}
 
 	type TradeModule = Module<Test>;
+	type SellOrders = TradeModule<Test>;
 
 	// This function basically just builds a genesis storage key/value store according to
 	// our desired mockup.
@@ -428,8 +429,9 @@ mod tests {
 		with_externalities(&mut new_test_ext(), || {
 			let ok: Result = Ok(());
 			assert_ok!(ok);
-
 			assert_eq!(1u32, 1);
+
+			let token1 = 
 		});
 	}
 }
