@@ -4,12 +4,13 @@ use system::ensure_signed;
 use parity_codec::{Encode, Decode};
 use runtime_primitives::traits::{Hash};
 use rstd::result;
+use rstd::fmt::Display;
 use rstd::prelude::*;
 use crate::token;
 
 pub trait Trait: token::Trait + system::Trait {
 	type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
-	type Price: Parameter + Default + Member + Bounded + SimpleArithmetic + Copy;
+	type Price: Parameter + Default + Member + Bounded + SimpleArithmetic + Copy + Display;
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq)]
@@ -62,9 +63,11 @@ impl<T> LimitOrderT<T> for LimitOrder<T> where T: Trait {
 
 impl<T> LimitOrder<T> where T: Trait {
 	fn new(base: T::Hash, quote: T::Hash, owner: T::AccountId, price: T::Price, amount: T::Balance, otype: OrderType) -> Self {
+		let nonce = <Nonce<T>>::get();
+
 		let hash = (<system::Module<T>>::random_seed(), 
 					<system::Module<T>>::block_number(), 
-					base, quote, owner.clone(), price, otype)
+					base, quote, owner.clone(), price, amount, otype, nonce)
 			.using_encoded(<T as system::Trait>::Hashing::hash);
 
 		LimitOrder {
@@ -129,7 +132,7 @@ impl<T: Trait> SellOrders<T> {
     }
 
     pub fn read(key1: T::Hash, key2: Option<T::Price>) -> LinkedItem<T> {
-        Self::get(&(key1, key2)).unwrap_or_else(|| {
+        Self::get((key1, key2)).unwrap_or_else(|| {
 			let item = LinkedItem {
 				prev: None,
 				next: None,
@@ -142,25 +145,40 @@ impl<T: Trait> SellOrders<T> {
     }
 
     pub fn write(key1: T::Hash, key2: Option<T::Price>, item: LinkedItem<T>) {
-        Self::insert(&(key1, key2), item);
+        Self::insert((key1, key2), item);
     }
 
 	pub fn output(key: T::Hash) {
 		let mut item = Self::read_head(key);
-
 		println!("");
 
-		while let Some(price) = item.next {
-			println!("{:?}, {:?}, {:?}, {}", item.next, item.prev, item.price, item.orders.len());
-			item = Self::read(key, item.next);
-		}
+		loop {
+			print!("{:?}, {:?}, {:?}, {}: ", item.next, item.prev, item.price, item.orders.len());
 
-		println!("{:?}, {:?}, {:?}, {}", item.next, item.prev, item.price, item.orders.len());
+			let mut orders = item.orders.iter();
+			loop {
+				match orders.next() {
+					Some(order_hash) => {
+						let order = <Orders<T>>::get(order_hash).unwrap();
+						print!("({} : {:?}), ", order.hash, order.amount);
+					},
+					None => break,
+				}
+			}
+
+			println!("");
+
+			if item.next == None {
+				break;
+			} else {
+				item = Self::read(key, item.next);
+			}
+		}
 	}
 
     pub fn append(key1: T::Hash, key2: T::Price, value: T::Hash) {
 
-        let item = Self::get(&(key1, Some(key2)));
+        let item = Self::get((key1, Some(key2)));
         match item {
             Some(mut item) => {
                 item.orders.push(value);
@@ -210,7 +228,7 @@ impl<T: Trait> SellOrders<T> {
     }
 
     pub fn remove_key2(key1: T::Hash, key2: T::Price) {
-        let item = Self::get(&(key1.clone(), Some(key2)));
+        let item = Self::get((key1, Some(key2)));
         match item {
             Some(item) => {
                 if item.orders.len() != 0 {
@@ -220,7 +238,7 @@ impl<T: Trait> SellOrders<T> {
             None => return,
         };
 
-        if let Some(item) = Self::take(&(key1.clone(), Some(key2))) {
+        if let Some(item) = Self::take((key1, Some(key2))) {
             Self::mutate((key1.clone(), item.prev), |x| {
                 if let Some(x) = x {
                     x.next = item.next;
@@ -238,7 +256,7 @@ impl<T: Trait> SellOrders<T> {
     /// when we do order match, the first order in LinkedItem will match first
     /// and if this order's remained_amount is zero, then it should be remove from the list
     pub fn remove_value(key1: T::Hash, key2: T::Price) -> Result {
-        let item = Self::get(&(key1.clone(), Some(key2)));
+        let item = Self::get((key1, Some(key2)));
         match item {
             Some(mut item) => {
                 ensure!(item.orders.len() > 0, "there is no order when we want to remove it");
@@ -319,7 +337,7 @@ decl_module! {
 				<SellOrders<T>>::append(tp.hash, price, hash);
 			}
 
-			let head = <SellOrders<T>>::read_head(tp.hash);
+			<Nonce<T>>::mutate(|n| *n += 1);
 
 			Self::deposit_event(RawEvent::OrderCreated(sender.clone(), hash, base, quote, price, amount));
 
@@ -627,15 +645,15 @@ mod tests {
 			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 5, 20));
 
 			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 12, 10));
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 12, 20));
 			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 12, 30));
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 12, 20));
 
 			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 20, 10));
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 20, 40));
 			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 20, 20));
 			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 20, 30));
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 20, 40));
 
-			// None(0), 5(2), 10(1), 12(3), 18(1), 20(4)
+			// None(0), 5(2: 10, 20), 10(1: 50), 12(3: 10, 30, 20), 18(1: 100), 20(4: 10, 40, 20, 30)
 			SellOrders::<Test>::output(tp_hash);
 		});
 	}
