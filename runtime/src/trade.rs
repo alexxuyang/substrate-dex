@@ -75,17 +75,25 @@ impl<T> LimitOrder<T> where T: Trait {
 
 decl_storage! {
 	trait Store for Module<T: Trait> as trade {
-		TradePairsByHash get(trade_pair_by_hash): map T::Hash => Option<TradePair<T::Hash>>;	///	TradePairHash => TradePair
-		TradePairsHashByBasequote get(trade_pair_hash_by_base_quote): map (T::Hash, T::Hash) => Option<T::Hash>;	/// (BaseTokenHash, quoteTokenHash) => TradePairHash
+		//	TradePairHash => TradePair
+		TradePairsByHash get(trade_pair_by_hash): map T::Hash => Option<TradePair<T::Hash>>;
+		// (BaseTokenHash, quoteTokenHash) => TradePairHash
+		TradePairsHashByBasequote get(trade_pair_hash_by_base_quote): map (T::Hash, T::Hash) => Option<T::Hash>;
 
-		Orders get(order): map T::Hash => Option<LimitOrder<T>>;	/// OrderHash => Order
-		OwnedOrders get(owned_orders): map (T::AccountId, u64) => Option<T::Hash>;	/// (AccoundId, Index) => OrderHash
-		OwnedOrdersIndex get(owned_orders_index): map T::AccountId => u64;	///	AccountId => Index
+		// OrderHash => Order
+		Orders get(order): map T::Hash => Option<LimitOrder<T>>;
+		// (AccoundId, Index) => OrderHash
+		OwnedOrders get(owned_orders): map (T::AccountId, u64) => Option<T::Hash>;
+		//	AccountId => Index
+		OwnedOrdersIndex get(owned_orders_index): map T::AccountId => u64;
+		
+		//	(TradePairHash, Index) => OrderHash
+		TradePairOwnedOrders get(trade_pair_owned_order): map (T::Hash, u64) => Option<T::Hash>;
+		//	TradePairHash => Index
+		TradePairOwnedOrdersIndex get(trade_pair_owned_order_index): map T::Hash => u64;
 
-		TradePairOwnedOrders get(trade_pair_owned_order): map (T::Hash, u64) => Option<T::Hash>;	///	(TradePairHash, Index) => OrderHash
-		TradePairOwnedOrdersIndex get(trade_pair_owned_order_index): map T::Hash => u64;	///	TradePairHash => Index
-
-		SellOrders get(sell_order): map (T::Hash, Option<T::Price>) => Option<LinkedItem<T>>;	/// (TradePairHash, Price) => LinkedItem
+		// (TradePairHash, Price) => LinkedItem
+		SellOrders get(sell_order): map (T::Hash, Option<T::Price>) => Option<LinkedItem<T>>;
 
 		Nonce: u64;
 	}
@@ -121,17 +129,34 @@ impl<T: Trait> SellOrders<T> {
     }
 
     pub fn read(key1: T::Hash, key2: Option<T::Price>) -> LinkedItem<T> {
-        Self::get(&(key1, key2)).unwrap_or_else(|| LinkedItem {
-            prev: None,
-            next: None,
-            price: None,
-            orders: Vec::new(),
-        })
+        Self::get(&(key1, key2)).unwrap_or_else(|| {
+			let item = LinkedItem {
+				prev: None,
+				next: None,
+				price: None,
+				orders: Vec::new(),
+			};
+			Self::write(key1, key2, item.clone());
+			item
+		})
     }
 
     pub fn write(key1: T::Hash, key2: Option<T::Price>, item: LinkedItem<T>) {
         Self::insert(&(key1, key2), item);
     }
+
+	pub fn output(key: T::Hash) {
+		let mut item = Self::read_head(key);
+
+		println!("");
+
+		while let Some(price) = item.next {
+			println!("{:?}, {:?}, {:?}, {}", item.next, item.prev, item.price, item.orders.len());
+			item = Self::read(key, item.next);
+		}
+
+		println!("{:?}, {:?}, {:?}, {}", item.next, item.prev, item.price, item.orders.len());
+	}
 
     pub fn append(key1: T::Hash, key2: T::Price, value: T::Hash) {
 
@@ -139,14 +164,17 @@ impl<T: Trait> SellOrders<T> {
         match item {
             Some(mut item) => {
                 item.orders.push(value);
+				Self::write(key1, Some(key2), item);
                 return
             },
             None => {
                 let mut item = Self::read_head(key1);
                 while let Some(price) = item.next {
-                    if key2 < price {
+                    if key2 > price {
                         item = Self::read(key1, item.next);
-                    }
+                    } else {
+						break;
+					}
                 }
 
                 // add key2 after item
@@ -285,6 +313,14 @@ decl_module! {
 			<TradePairOwnedOrders<T>>::insert((tp.hash, tp_owned_index), hash);
 			<TradePairOwnedOrdersIndex<T>>::insert(tp.hash, tp_owned_index + 1);
 
+			if otype == OrderType::Buy {
+				<SellOrders<T>>::append(tp.hash, price, hash);
+			} else {
+				<SellOrders<T>>::append(tp.hash, price, hash);
+			}
+
+			let head = <SellOrders<T>>::read_head(tp.hash);
+
 			Self::deposit_event(RawEvent::OrderCreated(sender.clone(), hash, base, quote, price, amount));
 
 			Ok(())
@@ -417,6 +453,7 @@ mod tests {
 
 	type TokenModule = token::Module<Test>;
 	type TradeModule = super::Module<Test>;
+	// type SellOrders = super::Module<Test>::SellOrders;
 
 	// This function basically just builds a genesis storage key/value store according to
 	// our desired mockup.
@@ -476,23 +513,31 @@ mod tests {
 			assert!(tp.base == base);
 			assert!(tp.quote == quote);
 
-			// limit order
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(ALICE), base, quote, OrderType::Buy, 1, 100));
-			let index = TradeModule::owned_orders_index(ALICE);
-			let order_hash = TradeModule::owned_orders((ALICE, index - 1));
+			// // sell orders is empty
+			let head = SellOrders::<Test>::read_head(tp_hash);
+			assert!(head.prev == None);
+			assert!(head.next == None);
+			assert!(head.price == None);
+			assert!(head.orders.len() == 0);
+
+			// add one sell limit order
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 18, 100));
+			let index = TradeModule::owned_orders_index(BOB);
+			let order_hash = TradeModule::owned_orders((BOB, index - 1));
 			assert!(order_hash.is_some());
 			let order_hash = order_hash.unwrap();
 			let order = TradeModule::order(order_hash);
 			assert!(order.is_some());
 			let order = order.unwrap();
+			let order1 = order.clone();
 			let o = LimitOrder {
 				base, quote, 
 				amount: 100,
-				otype: OrderType::Buy,
-				price: 1,
+				otype: OrderType::Sell,
+				price: 18,
 				remained_amount: 100,
 				status: OrderStatus::Created,
-				owner: ALICE,
+				owner: BOB,
 				hash: order_hash,
 			};
 			assert!(order == o);
@@ -506,7 +551,92 @@ mod tests {
 			let order = order.unwrap();
 			assert!(order == o);
 
-			
+			// have one sell orders
+			let head = SellOrders::<Test>::read_head(tp_hash);
+			assert!(head.prev != None);
+			assert!(head.next != None);
+			assert!(head.price == None);
+			assert!(head.orders.len() == 0);
+
+			let item1 = SellOrders::<Test>::read(tp_hash, Some(18u64));
+			assert!(head.prev == item1.price);
+			assert!(head.next == item1.price);
+			assert!(item1.price == Some(18u64));
+			assert!(item1.next == None);
+			assert!(item1.prev == None);
+			assert!(item1.orders.len() == 1);
+			assert!(item1.orders[0] == order1.hash);
+
+			SellOrders::<Test>::output(tp_hash);
+
+			// add another sell limit order
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 10, 50));
+			let index = TradeModule::owned_orders_index(BOB);
+			let order_hash = TradeModule::owned_orders((BOB, index - 1));
+			assert!(order_hash.is_some());
+			let order_hash = order_hash.unwrap();
+			let order = TradeModule::order(order_hash);
+			assert!(order.is_some());
+			let order = order.unwrap();
+			let order2 = order.clone();
+			let o = LimitOrder {
+				base, quote, 
+				amount: 50,
+				otype: OrderType::Sell,
+				price: 10,
+				remained_amount: 50,
+				status: OrderStatus::Created,
+				owner: BOB,
+				hash: order_hash,
+			};
+			assert!(order == o);
+
+			let index = TradeModule::trade_pair_owned_order_index(tp.hash);
+			let order_hash = TradeModule::trade_pair_owned_order((tp.hash, index - 1));
+			assert!(order_hash.is_some());
+			let order_hash = order_hash.unwrap();
+			let order = TradeModule::order(order_hash);
+			assert!(order.is_some());
+			let order = order.unwrap();
+			assert!(order == o);
+
+			// have one sell orders
+			let head = SellOrders::<Test>::read_head(tp_hash);
+			assert!(head.price == None);
+			assert!(head.orders.len() == 0);
+
+			let item1 = SellOrders::<Test>::read(tp_hash, Some(10u64));
+			assert!(head.next == item1.price);
+			assert!(item1.price == Some(10u64));
+			assert!(item1.prev == None);
+			assert!(item1.orders.len() == 1);
+			assert!(item1.orders[0] == order2.hash);
+
+			let item2 = SellOrders::<Test>::read(tp_hash, Some(18u64));
+			assert!(head.prev == item2.price);
+			assert!(item1.next == item2.price);
+			assert!(item2.next == None);
+			assert!(item2.prev == item1.price);
+			assert!(item2.price == Some(18u64));
+			assert!(item2.orders.len() == 1);
+			assert!(item2.orders[0] == order1.hash);
+
+			SellOrders::<Test>::output(tp_hash);
+
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 5, 10));
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 5, 20));
+
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 12, 10));
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 12, 20));
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 12, 30));
+
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 20, 10));
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 20, 20));
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 20, 30));
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 20, 40));
+
+			// None(0), 5(2), 10(1), 12(3), 18(1), 20(4)
+			SellOrders::<Test>::output(tp_hash);
 		});
 	}
 }
