@@ -1,5 +1,5 @@
 use support::{decl_module, decl_storage, decl_event, StorageValue, StorageMap, dispatch::Result, ensure, Parameter};
-use runtime_primitives::traits::{SimpleArithmetic, Bounded, Member, Zero};
+use runtime_primitives::traits::{SimpleArithmetic, Bounded, Member, Zero, MaybeDisplay, MaybeSerializeDebug, CheckEqual, SimpleBitOps};
 use system::ensure_signed;
 use parity_codec::{Encode, Decode};
 use runtime_primitives::traits::{Hash};
@@ -50,16 +50,6 @@ pub struct LimitOrder<T> where T: Trait {
 	status: OrderStatus,
 }
 
-pub trait LimitOrderT<T> where T: Trait {
-	fn is_finished(&self) -> bool;
-}
-
-impl<T> LimitOrderT<T> for LimitOrder<T> where T: Trait {
-	fn is_finished(&self) -> bool {
-		(self.remained_amount == Zero::zero() && self.status == OrderStatus::Filled) || self.status == OrderStatus::Canceled
-	}
-}
-
 impl<T> LimitOrder<T> where T: Trait {
 	fn new(base: T::Hash, quote: T::Hash, owner: T::AccountId, price: T::Price, amount: T::Balance, otype: OrderType) -> Self {
 		let nonce = <Nonce<T>>::get();
@@ -73,43 +63,23 @@ impl<T> LimitOrder<T> where T: Trait {
 			hash, base, quote, owner, price, otype, amount, status: OrderStatus::Created, remained_amount: amount,
 		}
 	}
-}
 
-decl_storage! {
-	trait Store for Module<T: Trait> as trade {
-		//	TradePairHash => TradePair
-		TradePairsByHash get(trade_pair_by_hash): map T::Hash => Option<TradePair<T::Hash>>;
-		// (BaseTokenHash, quoteTokenHash) => TradePairHash
-		TradePairsHashByBasequote get(trade_pair_hash_by_base_quote): map (T::Hash, T::Hash) => Option<T::Hash>;
-
-		// OrderHash => Order
-		Orders get(order): map T::Hash => Option<LimitOrder<T>>;
-		// (AccoundId, Index) => OrderHash
-		OwnedOrders get(owned_orders): map (T::AccountId, u64) => Option<T::Hash>;
-		//	AccountId => Index
-		OwnedOrdersIndex get(owned_orders_index): map T::AccountId => u64;
-		
-		//	(TradePairHash, Index) => OrderHash
-		TradePairOwnedOrders get(trade_pair_owned_order): map (T::Hash, u64) => Option<T::Hash>;
-		//	TradePairHash => Index
-		TradePairOwnedOrdersIndex get(trade_pair_owned_order_index): map T::Hash => u64;
-
-		// (TradePairHash, Price) => LinkedItem
-		SellOrders get(sell_order): map (T::Hash, Option<T::Price>) => Option<LinkedItem<T>>;
-
-		Nonce: u64;
+	fn is_finished(&self) -> bool {
+		(self.remained_amount == Zero::zero() && self.status == OrderStatus::Filled) || self.status == OrderStatus::Canceled
 	}
 }
 
 #[derive(Encode, Decode, Clone)]
 #[cfg_attr(feature="std", derive(PartialEq, Eq, Debug))]
-pub struct LinkedItem<T> where T: Trait
+pub struct LinkedItem<K1, K2>
 {
-    pub prev: Option<T::Price>,
-    pub next: Option<T::Price>,
-    pub price: Option<T::Price>,
-    pub orders: Vec<T::Hash>, // remove the item at 0 index will caused performance issue, should be optimized
+    pub prev: Option<K2>,
+    pub next: Option<K2>,
+    pub price: Option<K2>,
+    pub orders: Vec<K1>, // remove the item at 0 index will caused performance issue, should be optimized
 }
+
+pub struct LinkedList<T, S, K1, K2>(rstd::marker::PhantomData<(T, S, K1, K2)>);
 
 ///             LinkedItem              LinkedItem              LinkedItem              LinkedItem
 ///             Head                    Item1                   Item2                   Item3
@@ -125,13 +95,21 @@ pub struct LinkedItem<T> where T: Trait
 ///                                     when do order matching, o1 will match before o2 and so on
 
 /// Self: StorageMap, Key1: TradePairHash, Key2: Price, Value: OrderHash
-impl<T: Trait> SellOrders<T> {
-    pub fn read_head(key: T::Hash) -> LinkedItem<T> {
+impl<T, S, K1, K2> LinkedList<T, S, K1, K2> where
+	T: Trait,
+	K1: Encode + Decode + Clone + rstd::borrow::Borrow<<T as system::Trait>::Hash>
+		+ Parameter + Member + MaybeSerializeDebug + MaybeDisplay + SimpleBitOps + Default + Copy + CheckEqual
+		+ rstd::hash::Hash + AsRef<[u8]> + AsMut<[u8]>,
+	K2: Parameter + Default + Member + Bounded + SimpleArithmetic + Copy,
+	S: StorageMap<(K1, Option<K2>), LinkedItem<K1, K2>, Query = Option<LinkedItem<K1, K2>>>,
+{
+    pub fn read_head(key: K1) -> LinkedItem<K1, K2> {
         Self::read(key, None)
     }
 
-    pub fn read(key1: T::Hash, key2: Option<T::Price>) -> LinkedItem<T> {
-        Self::get((key1, key2)).unwrap_or_else(|| {
+    pub fn read(key1: K1, key2: Option<K2>) -> LinkedItem<K1, K2> {
+
+        S::get((key1, key2)).unwrap_or_else(|| {
 			let item = LinkedItem {
 				prev: None,
 				next: None,
@@ -143,13 +121,13 @@ impl<T: Trait> SellOrders<T> {
 		})
     }
 
-    pub fn write(key1: T::Hash, key2: Option<T::Price>, item: LinkedItem<T>) {
-        Self::insert((key1, key2), item);
+    pub fn write(key1: K1, key2: Option<K2>, item: LinkedItem<K1, K2>) {
+        S::insert((key1, key2), item);
     }
 
-    pub fn append(key1: T::Hash, key2: T::Price, value: T::Hash) {
+    pub fn append(key1: K1, key2: K2, value: K1) {
 
-        let item = Self::get((key1, Some(key2)));
+        let item = S::get((key1, Some(key2)));
         match item {
             Some(mut item) => {
                 item.orders.push(value);
@@ -198,8 +176,8 @@ impl<T: Trait> SellOrders<T> {
         };
     }
 
-    pub fn remove_key2(key1: T::Hash, key2: T::Price) {
-        let item = Self::get((key1, Some(key2)));
+    pub fn remove_key2(key1: K1, key2: K2) {
+        let item = S::get((key1, Some(key2)));
         match item {
             Some(item) => {
                 if item.orders.len() != 0 {
@@ -209,14 +187,14 @@ impl<T: Trait> SellOrders<T> {
             None => return,
         };
 
-        if let Some(item) = Self::take((key1, Some(key2))) {
-            Self::mutate((key1.clone(), item.prev), |x| {
+        if let Some(item) = S::take((key1, Some(key2))) {
+            S::mutate((key1.clone(), item.prev), |x| {
                 if let Some(x) = x {
                     x.next = item.next;
                 }
             });
 
-            Self::mutate((key1.clone(), item.next), |x| {
+            S::mutate((key1.clone(), item.next), |x| {
                 if let Some(x) = x {
                     x.prev = item.prev;
                 }
@@ -225,8 +203,8 @@ impl<T: Trait> SellOrders<T> {
     }
 
     // when the order is canceled, it should be remove from Sell / Buy orders
-    pub fn remove_value(key1: T::Hash, key2: T::Price) -> Result {
-        let mut it = Self::get((key1, Some(key2)));
+    pub fn remove_value(key1: K1, key2: K2) -> Result {
+        let mut it = S::get((key1, Some(key2)));
 
 		loop {
 			match it {
@@ -236,7 +214,7 @@ impl<T: Trait> SellOrders<T> {
 					let order_hash = item.orders.get(0);
 					ensure!(order_hash.is_some(), "can not get order from index 0 when we want to remove it");
 
-					let order = <Orders<T>>::get(order_hash.unwrap());
+					let order = <Orders<T>>::get(order_hash.unwrap().borrow());
 					ensure!(order.is_some(), "can not get order from index 0 when we want to remove it");
 					
 					let order = order.unwrap();
@@ -248,14 +226,14 @@ impl<T: Trait> SellOrders<T> {
 					Self::write(key1, Some(key2), item);
 
 					if item_orders_length == 0 {
-						if let Some(item) = Self::take((key1, Some(key2))) {
-							Self::mutate((key1.clone(), item.prev), |x| {
+						if let Some(item) = S::take((key1, Some(key2))) {
+							S::mutate((key1.clone(), item.prev), |x| {
 								if let Some(x) = x {
 									x.next = item.next;
 								}
 							});
 
-							Self::mutate((key1.clone(), item.next), |x| {
+							S::mutate((key1.clone(), item.next), |x| {
 								if let Some(x) = x {
 									x.prev = item.prev;
 								}
@@ -265,13 +243,43 @@ impl<T: Trait> SellOrders<T> {
 						}
 					}
 
-					it = Self::get((key1, Some(key2)));
+					it = S::get((key1, Some(key2)));
 				},
 				None => return Err("try to remove order but the order list is NOT FOUND")
 			}
 		}
     }
 }
+
+pub type OrderLinkedItem<T> = LinkedItem<<T as system::Trait>::Hash, <T as Trait>::Price>;
+pub type OrderLinkedList<T> = LinkedList<T, SellOrders<T>, <T as system::Trait>::Hash, <T as Trait>::Price>;
+
+decl_storage! {
+	trait Store for Module<T: Trait> as trade {
+		//	TradePairHash => TradePair
+		TradePairsByHash get(trade_pair_by_hash): map T::Hash => Option<TradePair<T::Hash>>;
+		// (BaseTokenHash, quoteTokenHash) => TradePairHash
+		TradePairsHashByBasequote get(trade_pair_hash_by_base_quote): map (T::Hash, T::Hash) => Option<T::Hash>;
+
+		// OrderHash => Order
+		Orders get(order): map T::Hash => Option<LimitOrder<T>>;
+		// (AccoundId, Index) => OrderHash
+		OwnedOrders get(owned_orders): map (T::AccountId, u64) => Option<T::Hash>;
+		//	AccountId => Index
+		OwnedOrdersIndex get(owned_orders_index): map T::AccountId => u64;
+		
+		//	(TradePairHash, Index) => OrderHash
+		TradePairOwnedOrders get(trade_pair_owned_order): map (T::Hash, u64) => Option<T::Hash>;
+		//	TradePairHash => Index
+		TradePairOwnedOrdersIndex get(trade_pair_owned_order_index): map T::Hash => u64;
+
+		// (TradePairHash, Price) => LinkedItem
+		SellOrders get(sell_order): map (T::Hash, Option<T::Price>) => Option<LinkedItem<T::Hash, T::Price>>;
+
+		Nonce: u64;
+	}
+}
+
 
 decl_event!(
 	pub enum Event<T> 
@@ -323,9 +331,9 @@ decl_module! {
 			<TradePairOwnedOrdersIndex<T>>::insert(tp.hash, tp_owned_index + 1);
 
 			if otype == OrderType::Buy {
-				<SellOrders<T>>::append(tp.hash, price, hash);
+				<OrderLinkedList<T>>::append(tp.hash, price, hash);
 			} else {
-				<SellOrders<T>>::append(tp.hash, price, hash);
+				<OrderLinkedList<T>>::append(tp.hash, price, hash);
 			}
 
 			<Nonce<T>>::mutate(|n| *n += 1);
@@ -472,7 +480,7 @@ mod tests {
 
 	fn output(key: <Test as system::Trait>::Hash) {
 
-		let mut item = <SellOrders<Test>>::read_head(key);
+		let mut item = <OrderLinkedList<Test>>::read_head(key);
 
 		loop {
 			print!("{:?}, {:?}, {:?}, {}: ", item.next, item.prev, item.price, item.orders.len());
@@ -494,7 +502,7 @@ mod tests {
 			if item.next == None {
 				break;
 			} else {
-				item = SellOrders::<Test>::read(key, item.next);
+				item = OrderLinkedList::<Test>::read(key, item.next);
 			}
 		}
 
@@ -554,7 +562,7 @@ mod tests {
 			assert!(tp.quote == quote);
 
 			// // sell orders is empty
-			let head = SellOrders::<Test>::read_head(tp_hash);
+			let head = OrderLinkedList::<Test>::read_head(tp_hash);
 			assert!(head.prev == None);
 			assert!(head.next == None);
 			assert!(head.price == None);
@@ -592,13 +600,13 @@ mod tests {
 			assert!(order == o);
 
 			// have one sell orders
-			let head = SellOrders::<Test>::read_head(tp_hash);
+			let head = OrderLinkedList::<Test>::read_head(tp_hash);
 			assert!(head.prev != None);
 			assert!(head.next != None);
 			assert!(head.price == None);
 			assert!(head.orders.len() == 0);
 
-			let item1 = SellOrders::<Test>::read(tp_hash, Some(18u64));
+			let item1 = OrderLinkedList::<Test>::read(tp_hash, Some(18u64));
 			assert!(head.prev == item1.price);
 			assert!(head.next == item1.price);
 			assert!(item1.price == Some(18u64));
@@ -641,18 +649,18 @@ mod tests {
 			assert!(order == o);
 
 			// have two sell orders
-			let head = SellOrders::<Test>::read_head(tp_hash);
+			let head = OrderLinkedList::<Test>::read_head(tp_hash);
 			assert!(head.price == None);
 			assert!(head.orders.len() == 0);
 
-			let item1 = SellOrders::<Test>::read(tp_hash, Some(10u64));
+			let item1 = OrderLinkedList::<Test>::read(tp_hash, Some(10u64));
 			assert!(head.next == item1.price);
 			assert!(item1.price == Some(10u64));
 			assert!(item1.prev == None);
 			assert!(item1.orders.len() == 1);
 			assert!(item1.orders[0] == order2.hash);
 
-			let item2 = SellOrders::<Test>::read(tp_hash, Some(18u64));
+			let item2 = OrderLinkedList::<Test>::read(tp_hash, Some(18u64));
 			assert!(head.prev == item2.price);
 			assert!(item1.next == item2.price);
 			assert!(item2.next == None);
@@ -797,7 +805,7 @@ mod tests {
 				price: None,
 				orders: Vec::new(),
 			};
-			assert!(SellOrders::<Test>::read_head(tp_hash) == head);
+			assert!(OrderLinkedList::<Test>::read_head(tp_hash) == head);
 
 			// price == 5 item
 			let mut orders = Vec::new();
@@ -810,7 +818,7 @@ mod tests {
 				price: Some(5),
 				orders: orders,
 			};
-			assert!(SellOrders::<Test>::read(tp_hash, Some(5)) == item1);
+			assert!(OrderLinkedList::<Test>::read(tp_hash, Some(5)) == item1);
 
 			// price == 10 item
 			let mut orders = Vec::new();
@@ -822,7 +830,7 @@ mod tests {
 				price: Some(10),
 				orders: orders,
 			};
-			assert!(SellOrders::<Test>::read(tp_hash, Some(10)) == item2);
+			assert!(OrderLinkedList::<Test>::read(tp_hash, Some(10)) == item2);
 
 			// price == 12 item
 			let mut orders = Vec::new();
@@ -836,7 +844,7 @@ mod tests {
 				price: Some(12),
 				orders: orders,
 			};
-			assert!(SellOrders::<Test>::read(tp_hash, Some(12)) == item3);
+			assert!(OrderLinkedList::<Test>::read(tp_hash, Some(12)) == item3);
 
 			// price == 18 item
 			let mut orders = Vec::new();
@@ -848,7 +856,7 @@ mod tests {
 				price: Some(18),
 				orders: orders,
 			};
-			assert!(SellOrders::<Test>::read(tp_hash, Some(18)) == item4);
+			assert!(OrderLinkedList::<Test>::read(tp_hash, Some(18)) == item4);
 
 			// None(0), 5(2: 10, 20), 10(1: 50), 12(3: 10, 30, 20), 18(1: 100)
 			output(tp_hash);
@@ -862,7 +870,7 @@ mod tests {
 			bob_sell_order_3_5_20_order.remained_amount = Zero::zero();
 			bob_sell_order_3_5_20_order.status = OrderStatus::Filled;
 			<Orders<Test>>::insert(bob_sell_order_3_5_20_order.hash, bob_sell_order_3_5_20_order);
-			<SellOrders<Test>>::remove_value(tp_hash, 5);
+			<OrderLinkedList<Test>>::remove_value(tp_hash, 5);
 
 			// None(0), 10(1: 50), 12(3: 10, 30, 20), 18(1: 100)
 			output(tp_hash);
@@ -873,7 +881,7 @@ mod tests {
 			bob_sell_order_1_10_50_order.remained_amount = bob_sell_order_1_10_50_order.remained_amount.checked_sub(25).unwrap();
 			bob_sell_order_1_10_50_order.status = OrderStatus::Canceled;
 			<Orders<Test>>::insert(bob_sell_order_1_10_50_order.hash, bob_sell_order_1_10_50_order);
-			<SellOrders<Test>>::remove_value(tp_hash, 10);
+			<OrderLinkedList<Test>>::remove_value(tp_hash, 10);
 			
 			// None(0), 12(3: 10, 30, 20), 18(1: 100)
 			output(tp_hash);
@@ -894,7 +902,7 @@ mod tests {
 			bob_sell_order_6_12_20_order.status = OrderStatus::PartialFilled;
 			<Orders<Test>>::insert(bob_sell_order_6_12_20_order.hash, bob_sell_order_6_12_20_order.clone());
 
-			<SellOrders<Test>>::remove_value(tp_hash, 12);
+			<OrderLinkedList<Test>>::remove_value(tp_hash, 12);
 			
 			// None(0), 12(3: 10(C) - removed, 30(F) - removed, 20(PF) - remained: 5), 18(1: 100)
 			output(tp_hash);
@@ -908,8 +916,8 @@ mod tests {
 			bob_sell_order_0_18_100_order.remained_amount = Zero::zero();
 			bob_sell_order_0_18_100_order.status = OrderStatus::Filled;
 			<Orders<Test>>::insert(bob_sell_order_0_18_100_order.hash, bob_sell_order_0_18_100_order);
-			<SellOrders<Test>>::remove_value(tp_hash, 12);
-			<SellOrders<Test>>::remove_value(tp_hash, 18);
+			<OrderLinkedList<Test>>::remove_value(tp_hash, 12);
+			<OrderLinkedList<Test>>::remove_value(tp_hash, 18);
 			
 			// None(0)
 			output(tp_hash);
