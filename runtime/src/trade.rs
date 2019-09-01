@@ -4,13 +4,12 @@ use system::ensure_signed;
 use parity_codec::{Encode, Decode};
 use runtime_primitives::traits::{Hash};
 use rstd::result;
-use rstd::fmt::Display;
 use rstd::prelude::*;
 use crate::token;
 
 pub trait Trait: token::Trait + system::Trait {
 	type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
-	type Price: Parameter + Default + Member + Bounded + SimpleArithmetic + Copy + Display;
+	type Price: Parameter + Default + Member + Bounded + SimpleArithmetic + Copy;
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq)]
@@ -57,7 +56,7 @@ pub trait LimitOrderT<T> where T: Trait {
 
 impl<T> LimitOrderT<T> for LimitOrder<T> where T: Trait {
 	fn is_filled(&self) -> bool {
-		(self.remained_amount == Zero::zero() && self.status == OrderStatus::Filled) || self.status == OrderStatus::PartialFilled
+		(self.remained_amount == Zero::zero() && self.status == OrderStatus::Filled) || self.status == OrderStatus::Canceled
 	}
 }
 
@@ -148,34 +147,6 @@ impl<T: Trait> SellOrders<T> {
         Self::insert((key1, key2), item);
     }
 
-	pub fn output(key: T::Hash) {
-		let mut item = Self::read_head(key);
-		println!("");
-
-		loop {
-			print!("{:?}, {:?}, {:?}, {}: ", item.next, item.prev, item.price, item.orders.len());
-
-			let mut orders = item.orders.iter();
-			loop {
-				match orders.next() {
-					Some(order_hash) => {
-						let order = <Orders<T>>::get(order_hash).unwrap();
-						print!("({} : {:?}), ", order.hash, order.amount);
-					},
-					None => break,
-				}
-			}
-
-			println!("");
-
-			if item.next == None {
-				break;
-			} else {
-				item = Self::read(key, item.next);
-			}
-		}
-	}
-
     pub fn append(key1: T::Hash, key2: T::Price, value: T::Hash) {
 
         let item = Self::get((key1, Some(key2)));
@@ -253,9 +224,8 @@ impl<T: Trait> SellOrders<T> {
         }
     }
 
-    /// when we do order match, the first order in LinkedItem will match first
-    /// and if this order's remained_amount is zero, then it should be remove from the list
-    pub fn remove_value(key1: T::Hash, key2: T::Price) -> Result {
+    // when the order is canceled, it should be remove from Sell / Buy orders
+    pub fn remove_value(key1: T::Hash, key2: T::Price, value: T::Hash) -> Result {
         let item = Self::get((key1, Some(key2)));
         match item {
             Some(mut item) => {
@@ -264,8 +234,7 @@ impl<T: Trait> SellOrders<T> {
                 let order_hash = item.orders.get(0);
                 ensure!(order_hash.is_some(), "can not get order from index 0 when we want to remove it");
 
-                let order_hash = order_hash.unwrap();
-				let order = <Orders<T>>::get(order_hash);
+				let order = <Orders<T>>::get(order_hash.unwrap());
 				ensure!(order.is_some(), "can not get order from index 0 when we want to remove it");
 				
 				let order = order.unwrap();
@@ -479,6 +448,35 @@ mod tests {
 		system::GenesisConfig::<Test>::default().build_storage().unwrap().0.into()
 	}
 
+	fn output(key: <Test as system::Trait>::Hash) {
+
+		let mut item = SellOrders::<Test>::read_head(key);
+		println!("");
+
+		loop {
+			print!("{:?}, {:?}, {:?}, {}: ", item.next, item.prev, item.price, item.orders.len());
+
+			let mut orders = item.orders.iter();
+			loop {
+				match orders.next() {
+					Some(order_hash) => {
+						let order = <Orders<Test>>::get(order_hash).unwrap();
+						print!("({} : {:?}), ", order.hash, order.amount);
+					},
+					None => break,
+				}
+			}
+
+			println!("");
+
+			if item.next == None {
+				break;
+			} else {
+				item = SellOrders::<Test>::read(key, item.next);
+			}
+		}
+	}
+
 	#[test]
 	fn trade_related_test_case() {
 		with_externalities(&mut new_test_ext(), || {
@@ -585,7 +583,7 @@ mod tests {
 			assert!(item1.orders.len() == 1);
 			assert!(item1.orders[0] == order1.hash);
 
-			SellOrders::<Test>::output(tp_hash);
+			output(tp_hash);
 
 			// add another sell limit order
 			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 10, 50));
@@ -639,7 +637,7 @@ mod tests {
 			assert!(item2.orders.len() == 1);
 			assert!(item2.orders[0] == order1.hash);
 
-			SellOrders::<Test>::output(tp_hash);
+			output(tp_hash);
 
 			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 5, 10));
 			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 5, 20));
@@ -654,7 +652,9 @@ mod tests {
 			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 20, 30));
 
 			// None(0), 5(2: 10, 20), 10(1: 50), 12(3: 10, 30, 20), 18(1: 100), 20(4: 10, 40, 20, 30)
-			SellOrders::<Test>::output(tp_hash);
+			output(tp_hash);
+
+			// remove value of sell orders
 		});
 	}
 }
