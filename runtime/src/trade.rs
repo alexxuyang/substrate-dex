@@ -3,8 +3,7 @@ use runtime_primitives::traits::{SimpleArithmetic, Bounded, Member, Zero};
 use system::ensure_signed;
 use parity_codec::{Encode, Decode};
 use runtime_primitives::traits::{Hash};
-use rstd::result;
-use rstd::prelude::*;
+use rstd::{prelude::*, result, cmp::Ordering};
 use crate::token;
 
 pub trait Trait: token::Trait + system::Trait {
@@ -174,52 +173,63 @@ impl<T, S, K1, K2> LinkedList<T, S, K1, K2> where
         };
     }
 
+	pub fn remove_all(key1: K1) -> Result {
+		let mut it = Self::read_head(key1);
+
+		while let Some(key2) = it.next {
+			Self::remove_value(key1, key2)?;
+			it = Self::read_head(key1);
+		}
+
+		Ok(())
+	}
+
     // when the order is canceled, it should be remove from Sell / Buy orders
     pub fn remove_value(key1: K1, key2: K2) -> Result {
         let mut it = S::get((key1, Some(key2)));
 
-		loop {
-			match it {
-				Some(mut item) => {
-					ensure!(item.orders.len() > 0, "there is no order when we want to remove it");
+		while let Some(mut item) = it {
 
-					let order_hash = item.orders.get(0);
-					ensure!(order_hash.is_some(), "can not get order from index 0 when we want to remove it");
+			let mut item_orders_length = 0;
 
-					let order = <Orders<T>>::get(order_hash.unwrap().borrow());
-					ensure!(order.is_some(), "can not get order from index 0 when we want to remove it");
-					
-					let order = order.unwrap();
-					ensure!(order.is_finished(), "try to remove not finished order");
+			if item.orders.len() > 0 {
+				let order_hash = item.orders.get(0);
+				ensure!(order_hash.is_some(), "can not get order from index 0 when we want to remove it");
 
-					item.orders.remove(0);
-					let item_orders_length = item.orders.len();
+				let order = <Orders<T>>::get(order_hash.unwrap().borrow());
+				ensure!(order.is_some(), "can not get order from index 0 when we want to remove it");
+				
+				let order = order.unwrap();
+				ensure!(order.is_finished(), "try to remove not finished order");
 
-					Self::write(key1, Some(key2), item);
+				item.orders.remove(0);
+				item_orders_length = item.orders.len();
 
-					if item_orders_length == 0 {
-						if let Some(item) = S::take((key1, Some(key2))) {
-							S::mutate((key1.clone(), item.prev), |x| {
-								if let Some(x) = x {
-									x.next = item.next;
-								}
-							});
-
-							S::mutate((key1.clone(), item.next), |x| {
-								if let Some(x) = x {
-									x.prev = item.prev;
-								}
-							});
-
-							return Ok(());
-						}
-					}
-
-					it = S::get((key1, Some(key2)));
-				},
-				None => return Err("try to remove order but the order list is NOT FOUND")
+				Self::write(key1, Some(key2), item);
 			}
+
+			if item_orders_length == 0 {
+				if let Some(item) = S::take((key1, Some(key2))) {
+					S::mutate((key1.clone(), item.prev), |x| {
+						if let Some(x) = x {
+							x.next = item.next;
+						}
+					});
+
+					S::mutate((key1.clone(), item.next), |x| {
+						if let Some(x) = x {
+							x.prev = item.prev;
+						}
+					});
+				}
+				
+				break;
+			}
+
+			it = S::get((key1, Some(key2)));
 		}
+
+		Ok(())
     }
 }
 
@@ -237,7 +247,7 @@ decl_storage! {
 		// OrderHash => Order
 		Orders get(order): map T::Hash => Option<LimitOrder<T>>;
 		// (AccoundId, Index) => OrderHash
-		OwnedOrders get(owned_orders): map (T::AccountId, u64) => Option<T::Hash>;
+		OwnedOrders get(owned_order): map (T::AccountId, u64) => Option<T::Hash>;
 		//	AccountId => Index
 		OwnedOrdersIndex get(owned_orders_index): map T::AccountId => u64;
 		
@@ -531,7 +541,7 @@ mod tests {
 			// add one sell limit order
 			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 18, 100));
 			let index = TradeModule::owned_orders_index(BOB);
-			let order_hash = TradeModule::owned_orders((BOB, index - 1));
+			let order_hash = TradeModule::owned_order((BOB, index - 1));
 			assert!(order_hash.is_some());
 			let order_hash = order_hash.unwrap();
 			let order = TradeModule::order(order_hash);
@@ -580,7 +590,7 @@ mod tests {
 			// add another sell limit order
 			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 10, 50));
 			let index = TradeModule::owned_orders_index(BOB);
-			let order_hash = TradeModule::owned_orders((BOB, index - 1));
+			let order_hash = TradeModule::owned_order((BOB, index - 1));
 			assert!(order_hash.is_some());
 			let order_hash = order_hash.unwrap();
 			let order = TradeModule::order(order_hash);
@@ -880,6 +890,77 @@ mod tests {
 			<SellOrdersList<Test>>::remove_value(tp_hash, 18);
 			
 			// None(0)
+			output(tp_hash);
+
+			// remove all test
+
+			// limit order
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 18, 100));
+			let order_hash = TradeModule::owned_order((BOB, 7)).unwrap();
+			let mut order1 = TradeModule::order(order_hash).unwrap();
+			assert_eq!(order1.amount, 100);
+
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 10, 50));
+			let order_hash = TradeModule::owned_order((BOB, 8)).unwrap();
+			let mut order2 = TradeModule::order(order_hash).unwrap();
+			assert_eq!(order2.amount, 50);
+
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 5, 10));
+			let order_hash = TradeModule::owned_order((BOB, 9)).unwrap();
+			let mut order3 = TradeModule::order(order_hash).unwrap();
+			
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 5, 20));
+			let order_hash = TradeModule::owned_order((BOB, 10)).unwrap();
+			let mut order4 = TradeModule::order(order_hash).unwrap();
+			
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 12, 10));
+			let order_hash = TradeModule::owned_order((BOB, 11)).unwrap();
+			let mut order5 = TradeModule::order(order_hash).unwrap();
+			
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 12, 30));
+			let order_hash = TradeModule::owned_order((BOB, 12)).unwrap();
+			let mut order6 = TradeModule::order(order_hash).unwrap();
+			
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 12, 20));
+			let order_hash = TradeModule::owned_order((BOB, 13)).unwrap();
+			let mut order7 = TradeModule::order(order_hash).unwrap();
+			assert_eq!(order7.amount, 20);
+
+			output(tp_hash);
+			
+			// price = 5
+			order3.remained_amount = Zero::zero();
+			order3.status = OrderStatus::Filled;
+			<Orders<Test>>::insert(order3.hash, order3);
+
+			order4.status = OrderStatus::Canceled;
+			<Orders<Test>>::insert(order4.hash, order4);
+
+			// price = 10
+			order2.remained_amount = Zero::zero();
+			order2.status = OrderStatus::Filled;
+			<Orders<Test>>::insert(order2.hash, order2);
+
+			<SellOrdersList<Test>>::remove_all(tp_hash);
+
+			output(tp_hash);
+
+			order1.remained_amount = Zero::zero();
+			order1.status = OrderStatus::Filled;
+			<Orders<Test>>::insert(order1.hash, order1);
+
+			order5.status = OrderStatus::Canceled;
+			<Orders<Test>>::insert(order5.hash, order5);
+
+			order6.status = OrderStatus::Canceled;
+			<Orders<Test>>::insert(order6.hash, order6);
+
+			order7.remained_amount = Zero::zero();
+			order7.status = OrderStatus::Filled;
+			<Orders<Test>>::insert(order7.hash, order7);
+
+			<SellOrdersList<Test>>::remove_all(tp_hash);
+
 			output(tp_hash);
 		});
 	}
