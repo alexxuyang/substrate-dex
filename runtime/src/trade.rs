@@ -300,14 +300,14 @@ decl_module! {
 			<OwnedOrders<T>>::insert((sender.clone(), owned_index), hash);
 			<OwnedOrdersIndex<T>>::insert(sender.clone(), owned_index + 1);
 
-			let tp_owned_index = Self::trade_pair_owned_order_index(tp.hash);
-			<TradePairOwnedOrders<T>>::insert((tp.hash, tp_owned_index), hash);
-			<TradePairOwnedOrdersIndex<T>>::insert(tp.hash, tp_owned_index + 1);
+			let tp_owned_index = Self::trade_pair_owned_order_index(tp);
+			<TradePairOwnedOrders<T>>::insert((tp, tp_owned_index), hash);
+			<TradePairOwnedOrdersIndex<T>>::insert(tp, tp_owned_index + 1);
 
 			if otype == OrderType::Buy {
-				<BuyOrdersList<T>>::append(tp.hash, price, hash);
+				<BuyOrdersList<T>>::append(tp, price, hash);
 			} else {
-				<SellOrdersList<T>>::append(tp.hash, price, hash);
+				<SellOrdersList<T>>::append(tp, price, hash);
 			}
 
 			<Nonce<T>>::mutate(|n| *n += 1);
@@ -320,26 +320,13 @@ decl_module! {
 }
 
 impl<T: Trait> Module<T> {
-	fn get_trade_pair_by_base_quote(base: T::Hash, quote: T::Hash) -> Option<TradePair<T::Hash>> {
-		let hash = Self::trade_pair_hash_by_base_quote((base, quote));
-
-		match hash {
-			Some(h) => Self::trade_pair_by_hash(h),
-			None => None,
-		}
-	}
-
-	fn ensure_trade_pair(base: T::Hash, quote: T::Hash) -> result::Result<TradePair<T::Hash>, &'static str> {
-		let bq = Self::get_trade_pair_by_base_quote(base, quote);
+	fn ensure_trade_pair(base: T::Hash, quote: T::Hash) -> result::Result<T::Hash, &'static str> {
+		let bq = Self::trade_pair_hash_by_base_quote((base, quote));
 		ensure!(bq.is_some(), "not trade pair with base & quote");
 
 		match bq {
-			Some(bq) => {
-				return Ok(bq)
-			},
-			None => {
-				return Err("not trade pair with base & quote")
-			},
+			Some(bq) => Ok(bq),
+			None => Err("not trade pair with base & quote"),
 		}
 	}
 
@@ -358,8 +345,8 @@ impl<T: Trait> Module<T> {
 		
 		ensure!(sender == base_owner || sender == quote_owner, "sender should be equal to owner of base or quote token");
 
-		let bq = Self::get_trade_pair_by_base_quote(base, quote);
-		let qb = Self::get_trade_pair_by_base_quote(quote, base);
+		let bq = Self::trade_pair_hash_by_base_quote((base, quote));
+		let qb = Self::trade_pair_hash_by_base_quote((quote, base));
 
 		ensure!(!bq.is_some() && !qb.is_some(), "the same trade pair already exists");
 
