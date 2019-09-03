@@ -13,10 +13,12 @@ pub trait Trait: token::Trait + system::Trait {
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "std", derive(Debug))]
-pub struct TradePair<Hash> {
-	hash: Hash,
-	base: Hash,
-	quote: Hash,
+pub struct TradePair<T> where T: Trait {
+	hash: T::Hash,
+	base: T::Hash,
+	quote: T::Hash,
+	buy_one_price: T::Price,
+	sell_one_price: T::Price,
 }
 
 #[derive(Encode, Decode, Clone, Copy, PartialEq)]
@@ -78,26 +80,7 @@ pub struct LinkedItem<K1, K2>
     pub orders: Vec<K1>, // remove the item at 0 index will caused performance issue, should be optimized
 }
 
-pub trait OrderIt {
-    fn get_order() -> Ordering;
-}
-
-struct Greater {}
-struct Less {}
-
-impl OrderIt for Greater {
-    fn get_order() -> Ordering {
-        Ordering::Greater
-    }
-}
-
-impl OrderIt for Less {
-    fn get_order() -> Ordering {
-        Ordering::Less
-    }
-}
-
-pub struct LinkedList<T, S, K1, K2, O>(rstd::marker::PhantomData<(T, S, K1, K2, O)>);
+pub struct LinkedList<T, S, K1, K2>(rstd::marker::PhantomData<(T, S, K1, K2)>);
 
 ///             LinkedItem              LinkedItem              LinkedItem              LinkedItem
 ///             Head                    Item1                   Item2                   Item3
@@ -113,12 +96,11 @@ pub struct LinkedList<T, S, K1, K2, O>(rstd::marker::PhantomData<(T, S, K1, K2, 
 ///                                     when do order matching, o1 will match before o2 and so on
 
 /// Self: StorageMap, Key1: TradePairHash, Key2: Price, Value: OrderHash
-impl<T, S, K1, K2, O> LinkedList<T, S, K1, K2, O> where
+impl<T, S, K1, K2> LinkedList<T, S, K1, K2> where
 	T: Trait,
 	K1: Encode + Decode + Clone + rstd::borrow::Borrow<<T as system::Trait>::Hash> + Copy,
 	K2: Parameter + Default + Member + Bounded + SimpleArithmetic + Copy,
 	S: StorageMap<(K1, Option<K2>), LinkedItem<K1, K2>, Query = Option<LinkedItem<K1, K2>>>,
-	O: OrderIt,
 {
     pub fn read_head(key: K1) -> LinkedItem<K1, K2> {
         Self::read(key, None)
@@ -142,7 +124,7 @@ impl<T, S, K1, K2, O> LinkedList<T, S, K1, K2, O> where
         S::insert((key1, key2), item);
     }
 
-    pub fn append(key1: K1, key2: K2, value: K1) {
+    pub fn append(key1: K1, key2: K2, value: K1, otype: OrderType) {
 
         let item = S::get((key1, Some(key2)));
         match item {
@@ -154,10 +136,10 @@ impl<T, S, K1, K2, O> LinkedList<T, S, K1, K2, O> where
             None => {
                 let mut item = Self::read_head(key1);
                 while let Some(price) = item.next {
-                    // if key2 > price {
-                    if key2.cmp(&price) == O::get_order() {
-                        item = Self::read(key1, item.next);
-                    } else {
+					if 	(otype == OrderType::Sell && key2 > price) || 
+						(otype == OrderType::Buy && key2 < price) {
+						item = Self::read(key1, item.next);
+					} else {
 						break;
 					}
                 }
@@ -252,16 +234,52 @@ impl<T, S, K1, K2, O> LinkedList<T, S, K1, K2, O> where
 
 		Ok(())
     }
+
+	fn ordering_op(order: LimitOrder<T>) -> Ordering {
+		match order.otype {
+			OrderType::Sell => Ordering::Greater,
+			OrderType::Buy => Ordering::Less,
+		}
+	}
+
+	pub fn order_match(tp_hash: K1, order: LimitOrder<T>) {
+		let op = Self::ordering_op(order);
+
+		let mut item = Self::read_head(tp_hash);
+
+		// loop {
+		// 	print!("{:?}, {:?}, {:?}, {}: ", item.next, item.prev, item.price, item.orders.len());
+
+		// 	let mut orders = item.orders.iter();
+		// 	loop {
+		// 		match orders.next() {
+		// 			Some(order_hash) => {
+		// 				let order = <Orders<Test>>::get(order_hash).unwrap();
+		// 				print!("({} : {}, {}), ", order.hash, order.amount, order.remained_amount);
+		// 			},
+		// 			None => break,
+		// 		}
+		// 	}
+
+		// 	println!("");
+
+		// 	if item.next == None {
+		// 		break;
+		// 	} else {
+		// 		item = SellOrdersList::<Test>::read(key, item.next);
+		// 	}
+		// }
+	}
 }
 
 type OrderLinkedItem<T> = LinkedItem<<T as system::Trait>::Hash, <T as Trait>::Price>;
-type SellOrdersList<T> = LinkedList<T, SellOrders<T>, <T as system::Trait>::Hash, <T as Trait>::Price, Greater>;
-type BuyOrdersList<T> = LinkedList<T, BuyOrders<T>, <T as system::Trait>::Hash, <T as Trait>::Price, Less>;
+type SellOrdersList<T> = LinkedList<T, SellOrders<T>, <T as system::Trait>::Hash, <T as Trait>::Price>;
+type BuyOrdersList<T> = LinkedList<T, BuyOrders<T>, <T as system::Trait>::Hash, <T as Trait>::Price>;
 
 decl_storage! {
 	trait Store for Module<T: Trait> as trade {
 		//	TradePairHash => TradePair
-		TradePairsByHash get(trade_pair_by_hash): map T::Hash => Option<TradePair<T::Hash>>;
+		TradePairsByHash get(trade_pair_by_hash): map T::Hash => Option<TradePair<T>>;
 		// (BaseTokenHash, quoteTokenHash) => TradePairHash
 		TradePairsHashByBasequote get(trade_pair_hash_by_base_quote): map (T::Hash, T::Hash) => Option<T::Hash>;
 
@@ -292,7 +310,7 @@ decl_event!(
 		<T as system::Trait>::Hash,
 		<T as Trait>::Price,
 		<T as balances::Trait>::Balance,
-		TradePair = TradePair<<T as system::Trait>::Hash>,
+		TradePair = TradePair<T>,
 	{
 		TradePairCreated(AccountId, Hash, TradePair),
 		OrderCreated(AccountId, Hash, Hash, Hash, Price, Balance), // (alice, orderHash, baseTokenHash, quoteTokenHash, price, balance)
@@ -309,7 +327,11 @@ decl_module! {
 
 		pub fn create_limit_order(origin, base: T::Hash, quote: T::Hash, otype: OrderType, price: T::Price, amount: T::Balance) -> Result {
 			let sender = ensure_signed(origin)?;
-			let tp = Self::ensure_trade_pair(base, quote)?;
+
+			let tp_hash = Self::ensure_trade_pair(base, quote)?;
+			let tp = Self::trade_pair_by_hash(tp_hash);
+			ensure!(tp.is_some(), "can not get trade pair by hash");
+			let tp = tp.unwrap();
 
 			ensure!(price > Zero::zero(), "price should be great than zero");
 			
@@ -324,23 +346,29 @@ decl_module! {
 
 			<token::Module<T>>::do_freeze(sender.clone(), op_token_hash, amount)?;
 			<token::Module<T>>::ensure_free_balance(sender.clone(), op_token_hash, amount)?;
-			<Orders<T>>::insert(hash, order);
+			<Orders<T>>::insert(hash, order.clone());
 
 			let owned_index = Self::owned_orders_index(sender.clone());
 			<OwnedOrders<T>>::insert((sender.clone(), owned_index), hash);
 			<OwnedOrdersIndex<T>>::insert(sender.clone(), owned_index + 1);
 
-			let tp_owned_index = Self::trade_pair_owned_order_index(tp);
-			<TradePairOwnedOrders<T>>::insert((tp, tp_owned_index), hash);
-			<TradePairOwnedOrdersIndex<T>>::insert(tp, tp_owned_index + 1);
-
-			if otype == OrderType::Buy {
-				<BuyOrdersList<T>>::append(tp, price, hash);
-			} else {
-				<SellOrdersList<T>>::append(tp, price, hash);
-			}
+			let tp_owned_index = Self::trade_pair_owned_order_index(tp_hash);
+			<TradePairOwnedOrders<T>>::insert((tp_hash, tp_owned_index), hash);
+			<TradePairOwnedOrdersIndex<T>>::insert(tp_hash, tp_owned_index + 1);
 
 			<Nonce<T>>::mutate(|n| *n += 1);
+
+			if otype == OrderType::Buy {
+				<BuyOrdersList<T>>::append(tp_hash, price, hash, otype);
+				if order.price >= tp.sell_one_price {
+					<BuyOrdersList<T>>::order_match(tp_hash, order);
+				}
+			} else {
+				<SellOrdersList<T>>::append(tp_hash, price, hash, otype);
+				if order.price <= tp.buy_one_price {
+					<SellOrdersList<T>>::order_match(tp_hash, order);
+				}
+			}
 
 			Self::deposit_event(RawEvent::OrderCreated(sender.clone(), hash, base, quote, price, amount));
 
@@ -386,7 +414,9 @@ impl<T: Trait> Module<T> {
 			.using_encoded(<T as system::Trait>::Hashing::hash);
 
 		let tp = TradePair {
-			hash, base, quote
+			hash, base, quote,
+			buy_one_price: Zero::zero(),
+			sell_one_price: Zero::zero(),
 		};
 
 		<Nonce<T>>::mutate(|n| *n += 1);
