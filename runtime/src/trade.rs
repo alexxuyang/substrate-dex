@@ -220,19 +220,40 @@ impl<T, S, K1, K2> LinkedList<T, S, K1, K2> where
         };
     }
 
-	pub fn remove_all(key1: K1) -> Result {
-		let mut it = Self::read_head(key1);
+	pub fn next_match_price(next: Option<K2>, prev: Option<K2>, otype: OrderType) -> Option<K2> {
+		if otype == OrderType::Buy {
+			prev
+		} else {
+			next
+		}
+	}
 
-		while let Some(key2) = it.next {
-			Self::remove_value(key1, key2)?;
-			it = Self::read_head(key1);
+	pub fn remove_items(key1: K1, otype: OrderType) -> Result {
+		let end_item;
+
+		if otype == OrderType::Buy {
+			end_item = Some(K2::min_value());
+		} else {
+			end_item = Some(K2::max_value());
+		}
+
+		let mut head = Self::read_head(key1);
+
+		loop {
+			let key2 = Self::next_match_price(head.next, head.prev, otype);
+			if key2 == end_item {
+				break;
+			}
+
+			Self::remove_item(key1, key2.unwrap())?;
+			head = Self::read_head(key1);
 		}
 
 		Ok(())
 	}
 
     // when the order is canceled, it should be remove from Sell / Buy orders
-    pub fn remove_value(key1: K1, key2: K2) -> Result {
+    pub fn remove_item(key1: K1, key2: K2) -> Result {
 
 		match S::get((key1, Some(key2))) {
 			Some(mut item) => {
@@ -269,13 +290,6 @@ impl<T, S, K1, K2> LinkedList<T, S, K1, K2> where
 
 		Ok(())
     }
-
-	fn ordering_op(order: LimitOrder<T>) -> Ordering {
-		match order.otype {
-			OrderType::Sell => Ordering::Greater,
-			OrderType::Buy => Ordering::Less,
-		}
-	}
 }
 
 type OrderLinkedItem<T> = LinkedItem<<T as system::Trait>::Hash, <T as Trait>::Price>;
@@ -534,6 +548,9 @@ mod tests {
 			let BOB = 20;
 			let CHARLIE = 30;
 
+			let max = Some(<Test as Trait>::Price::max_value());
+			let min = Some(<Test as Trait>::Price::min_value());
+
 			// token1
 			assert_ok!(TokenModule::issue(Origin::signed(ALICE), b"66".to_vec(), 21000000));
 			let token1_hash = TokenModule::owned_token((ALICE, 0)).unwrap();
@@ -551,39 +568,30 @@ mod tests {
 			let tp_hash = TradeModule::trade_pair_hash_by_base_quote((base, quote)).unwrap();
 			let tp = TradeModule::trade_pair_by_hash(tp_hash).unwrap();
 
-			let head = <OrderLinkedItemList<Test>>::read_head(tp_hash);
-			let bottom = <OrderLinkedItemList<Test>>::read_bottom(tp_hash);
-			let top = <OrderLinkedItemList<Test>>::read_top(tp_hash);
-			println!("BOTTOM: {:?}", bottom);
-			println!("HEAD: {:?}", head);
-			println!("TOP: {:?}", top);
-
-			println!("");
-
-			let b = LinkedItem {
-				prev: Some(<Test as Trait>::Price::max_value()),
+			let bottom = LinkedItem {
+				prev: max,
 				next: None,
-				price: Some(<Test as Trait>::Price::min_value()),
+				price: min,
 				orders: Vec::new(),
 			};
 
-			let t = LinkedItem {
+			let top = LinkedItem {
 				prev: None,
-				next: Some(<Test as Trait>::Price::min_value()),
-				price: Some(<Test as Trait>::Price::max_value()),
+				next: min,
+				price: max,
 				orders: Vec::new(),
 			};
 
-			let h = LinkedItem {
-				prev: Some(<Test as Trait>::Price::min_value()),
-				next: Some(<Test as Trait>::Price::max_value()),
+			let head = LinkedItem {
+				prev: min,
+				next: max,
 				price: None,
 				orders: Vec::new(),
 			};
 
-			assert_eq!(head, h);
-			assert_eq!(bottom, b);
-			assert_eq!(top, t);
+			assert_eq!(head, <OrderLinkedItemList<Test>>::read_head(tp_hash));
+			assert_eq!(bottom, <OrderLinkedItemList<Test>>::read_bottom(tp_hash));
+			assert_eq!(top, <OrderLinkedItemList<Test>>::read_top(tp_hash));
 
 			output_order(tp_hash);
 
@@ -643,19 +651,6 @@ mod tests {
 			let order104_hash = TradeModule::owned_order((ALICE, 3)).unwrap();
 			let mut order104 = TradeModule::order(order104_hash).unwrap();
 			assert_eq!(order104.amount, 1000000);
-
-			// Bottom ==> Price(Some(0)), Next(Some(1)), Prev(Some(18446744073709551615)), Orders(0): 
-			// Price(Some(1)), Next(Some(2)), Prev(Some(0)), Orders(1): (0x2063…669c : 12, 12), 
-			// Price(Some(2)), Next(Some(4)), Prev(Some(1)), Orders(2): (0x5fe7…c31c : 5, 5), (0xb0a8…fb1a : 1000000, 1000000), 
-			// Price(Some(4)), Next(None), Prev(Some(2)), Orders(1): (0x4293…b948 : 100, 100), 
-			// Head ==> Price(None), Next(Some(5)), Prev(Some(4)), Orders(0): 
-			// Price(Some(5)), Next(Some(10)), Prev(None), Orders(2): (0x6de6…98b4 : 10, 10), (0x895b…0377 : 20, 20), 
-			// Price(Some(10)), Next(Some(12)), Prev(Some(5)), Orders(1): (0xc10f…32e3 : 50, 50), 
-			// Price(Some(12)), Next(Some(18)), Prev(Some(10)), Orders(3): (0xefbf…d851 : 10, 10), (0xe71e…8be1 : 30, 30), (0xbbe2…36b9 : 20, 20), 
-			// Price(Some(18)), Next(Some(18446744073709551615)), Prev(Some(12)), Orders(1): (0x8439…5abc : 100, 100), 
-			// Top ==> Price(Some(18446744073709551615)), Next(Some(0)), Prev(Some(18)), Orders(0): 
-
-			output_order(tp_hash);
 
 			// head
 			let mut item = LinkedItem {
@@ -718,7 +713,7 @@ mod tests {
 			v.push(order1_hash);
 
 			item = LinkedItem {
-				next: Some(<Test as Trait>::Price::max_value()),
+				next: max,
 				prev: Some(12),
 				price: Some(18),
 				orders: v,
@@ -727,9 +722,9 @@ mod tests {
 
 			// top
 			item = LinkedItem {
-				next: Some(<Test as Trait>::Price::min_value()),
+				next: min,
 				prev: Some(18),
-				price: Some(<Test as Trait>::Price::max_value()),
+				price: max,
 				orders: Vec::new(),
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read_top(tp_hash), item);
@@ -737,8 +732,8 @@ mod tests {
 			// bottom
 			item = LinkedItem {
 				next: Some(1),
-				prev: Some(<Test as Trait>::Price::max_value()),
-				price: Some(<Test as Trait>::Price::min_value()),
+				prev: max,
+				price: min,
 				orders: Vec::new(),
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read_bottom(tp_hash), item);
@@ -751,7 +746,7 @@ mod tests {
 
 			item = LinkedItem {
 				next: Some(2),
-				prev: Some(<Test as Trait>::Price::min_value()),
+				prev: min,
 				price: Some(1),
 				orders: v,
 			};
@@ -786,8 +781,227 @@ mod tests {
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
-			// remove some items
+			// remove sell orders
+			OrderLinkedItemList::<Test>::remove_items(tp_hash, OrderType::Sell);
+			OrderLinkedItemList::<Test>::remove_items(tp_hash, OrderType::Buy);
+
+			// Bottom ==> Price(Some(0)), Next(Some(1)), Prev(Some(18446744073709551615)), Orders(0): 
+			// Price(Some(1)), Next(Some(2)), Prev(Some(0)), Orders(1): (0x2063…669c : 12, 12), 
+			// Price(Some(2)), Next(Some(4)), Prev(Some(1)), Orders(2): (0x5fe7…c31c : 5, 5), (0xb0a8…fb1a : 1000000, 1000000), 
+			// Price(Some(4)), Next(None), Prev(Some(2)), Orders(1): (0x4293…b948 : 100, 100), 
+			// Head ==> Price(None), Next(Some(5)), Prev(Some(4)), Orders(0): 
+			// Price(Some(5)), Next(Some(10)), Prev(None), Orders(2): (0x6de6…98b4 : 10, 10), (0x895b…0377 : 20, 20), 
+			// Price(Some(10)), Next(Some(12)), Prev(Some(5)), Orders(1): (0xc10f…32e3 : 50, 50), 
+			// Price(Some(12)), Next(Some(18)), Prev(Some(10)), Orders(3): (0xefbf…d851 : 10, 10), (0xe71e…8be1 : 30, 30), (0xbbe2…36b9 : 20, 20), 
+			// Price(Some(18)), Next(Some(18446744073709551615)), Prev(Some(12)), Orders(1): (0x8439…5abc : 100, 100), 
+			// Top ==> Price(Some(18446744073709551615)), Next(Some(0)), Prev(Some(18)), Orders(0): 
+			output_order(tp_hash);
+
+			// price = 5
+			order3.remained_amount = Zero::zero();
+			order3.status = OrderStatus::Filled;
+			<Orders<Test>>::insert(order3.hash, order3);
+
+			order4.status = OrderStatus::Canceled;
+			<Orders<Test>>::insert(order4.hash, order4);
+
+			// price = 10
+			order2.remained_amount = Zero::zero();
+			order2.status = OrderStatus::Filled;
+			<Orders<Test>>::insert(order2.hash, order2);
+
+			// price = 12
+			order5.status = OrderStatus::Canceled;
+			<Orders<Test>>::insert(order5.hash, order5);
+
+			order6.remained_amount = order6.remained_amount.checked_sub(1).unwrap();
+			order6.status = OrderStatus::PartialFilled;
+			<Orders<Test>>::insert(order6.hash, order6.clone());
+
+			OrderLinkedItemList::<Test>::remove_items(tp_hash, OrderType::Sell);
+
+			// head
+			item = LinkedItem {
+				next: Some(12),
+				prev: Some(4),
+				price: None,
+				orders: Vec::new(),
+			};
+			assert_eq!(OrderLinkedItemList::<Test>::read_head(tp_hash), item);
+
+			// item1
+			curr = item.next;
 			
+			v = Vec::new();
+			v.push(order6_hash);
+			v.push(order7_hash);
+
+			item = LinkedItem {
+				next: Some(18),
+				prev: None,
+				price: Some(12),
+				orders: v,
+			};
+			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
+
+			// item2
+			curr = item.next;
+
+			v = Vec::new();
+			v.push(order1_hash);
+
+			item = LinkedItem {
+				next: max,
+				prev: Some(12),
+				price: Some(18),
+				orders: v,
+			};
+			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
+
+			<OrderLinkedItemList<Test>>::remove_items(tp_hash, OrderType::Sell);
+
+			// Bottom ==> Price(Some(0)), Next(Some(1)), Prev(Some(18446744073709551615)), Orders(0): 
+			// Price(Some(1)), Next(Some(2)), Prev(Some(0)), Orders(1): (0x2063…669c : 12, 12), 
+			// Price(Some(2)), Next(Some(4)), Prev(Some(1)), Orders(2): (0x5fe7…c31c : 5, 5), (0xb0a8…fb1a : 1000000, 1000000), 
+			// Price(Some(4)), Next(None), Prev(Some(2)), Orders(1): (0x4293…b948 : 100, 100), 
+			// Head ==> Price(None), Next(Some(12)), Prev(Some(4)), Orders(0): 
+			// Price(Some(12)), Next(Some(18)), Prev(None), Orders(2): (0xe71e…8be1 : 30, 29), (0xbbe2…36b9 : 20, 20), 
+			// Price(Some(18)), Next(Some(18446744073709551615)), Prev(Some(12)), Orders(1): (0x8439…5abc : 100, 100), 
+			// Top ==> Price(Some(18446744073709551615)), Next(Some(0)), Prev(Some(18)), Orders(0): 
+			output_order(tp_hash);
+
+			// price = 18
+			order1.status = OrderStatus::Canceled;
+			<Orders<Test>>::insert(order1.hash, order1);
+
+			// price = 12
+			order6.remained_amount = Zero::zero();
+			order6.status = OrderStatus::Filled;
+			<Orders<Test>>::insert(order6.hash, order6);
+
+			order7.remained_amount = Zero::zero();
+			order7.status = OrderStatus::Filled;
+			<Orders<Test>>::insert(order7.hash, order7);
+
+			<OrderLinkedItemList<Test>>::remove_items(tp_hash, OrderType::Sell);
+
+			// head
+			item = LinkedItem {
+				next: max,
+				prev: Some(4),
+				price: None,
+				orders: Vec::new(),
+			};
+			assert_eq!(OrderLinkedItemList::<Test>::read_head(tp_hash), item);
+
+			// Bottom ==> Price(Some(0)), Next(Some(1)), Prev(Some(18446744073709551615)), Orders(0): 
+			// Price(Some(1)), Next(Some(2)), Prev(Some(0)), Orders(1): (0x2063…669c : 12, 12), 
+			// Price(Some(2)), Next(Some(4)), Prev(Some(1)), Orders(2): (0x5fe7…c31c : 5, 5), (0xb0a8…fb1a : 1000000, 1000000), 
+			// Price(Some(4)), Next(None), Prev(Some(2)), Orders(1): (0x4293…b948 : 100, 100), 
+			// Head ==> Price(None), Next(Some(18446744073709551615)), Prev(Some(4)), Orders(0): 
+			// Top ==> Price(Some(18446744073709551615)), Next(Some(0)), Prev(None), Orders(0): 
+			output_order(tp_hash);
+
+			// remove buy orders
+			// price = 4
+			order103.remained_amount = Zero::zero();
+			order103.status = OrderStatus::Filled;
+			<Orders<Test>>::insert(order103.hash, order103);
+
+			// price = 2
+			order101.status = OrderStatus::Canceled;
+			<Orders<Test>>::insert(order101.hash, order101);
+
+			order104.remained_amount = order104.remained_amount.checked_sub(100).unwrap();
+			order104.status = OrderStatus::PartialFilled;
+			<Orders<Test>>::insert(order104.hash, order104.clone());
+
+			<OrderLinkedItemList<Test>>::remove_items(tp_hash, OrderType::Buy);
+
+			// bottom
+			item = LinkedItem {
+				next: Some(1),
+				prev: max,
+				price: min,
+				orders: Vec::new(),
+			};
+			assert_eq!(OrderLinkedItemList::<Test>::read_bottom(tp_hash), item);
+
+			// item1
+			let mut curr = item.next;
+
+			let mut v = Vec::new();
+			v.push(order102_hash);
+
+			item = LinkedItem {
+				next: Some(2),
+				prev: min,
+				price: Some(1),
+				orders: v,
+			};
+			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
+
+			// item2
+			curr = item.next;
+
+			v = Vec::new();
+			v.push(order104_hash);
+
+			item = LinkedItem {
+				next: None,
+				prev: Some(1),
+				price: Some(2),
+				orders: v,
+			};
+			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
+
+			// Bottom ==> Price(Some(0)), Next(Some(1)), Prev(Some(18446744073709551615)), Orders(0): 
+			// Price(Some(1)), Next(Some(2)), Prev(Some(0)), Orders(1): (0x2063…669c : 12, 12), 
+			// Price(Some(2)), Next(None), Prev(Some(1)), Orders(1): (0xb0a8…fb1a : 1000000, 999900), 
+			// Head ==> Price(None), Next(Some(18446744073709551615)), Prev(Some(2)), Orders(0): 
+			// Top ==> Price(Some(18446744073709551615)), Next(Some(0)), Prev(None), Orders(0):
+			output_order(tp_hash);
+
+			// price = 2
+			order104.status = OrderStatus::Canceled;
+			<Orders<Test>>::insert(order104.hash, order104);
+
+			// price = 1
+			order102.remained_amount = Zero::zero();
+			order102.status = OrderStatus::Filled;
+			<Orders<Test>>::insert(order102.hash, order102);
+
+			<OrderLinkedItemList<Test>>::remove_items(tp_hash, OrderType::Buy);
+
+			let bottom = LinkedItem {
+				prev: max,
+				next: None,
+				price: min,
+				orders: Vec::new(),
+			};
+
+			let top = LinkedItem {
+				prev: None,
+				next: min,
+				price: max,
+				orders: Vec::new(),
+			};
+
+			let head = LinkedItem {
+				prev: min,
+				next: max,
+				price: None,
+				orders: Vec::new(),
+			};
+
+			assert_eq!(head, <OrderLinkedItemList<Test>>::read_head(tp_hash));
+			assert_eq!(bottom, <OrderLinkedItemList<Test>>::read_bottom(tp_hash));
+			assert_eq!(top, <OrderLinkedItemList<Test>>::read_top(tp_hash));			
+
+			// Bottom ==> Price(Some(0)), Next(None), Prev(Some(18446744073709551615)), Orders(0): 
+			// Head ==> Price(None), Next(Some(18446744073709551615)), Prev(Some(0)), Orders(0): 
+			// Top ==> Price(Some(18446744073709551615)), Next(Some(0)), Prev(None), Orders(0):
+			output_order(tp_hash);
 		});
 	}
 }
