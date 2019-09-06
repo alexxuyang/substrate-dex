@@ -82,20 +82,21 @@ pub struct LinkedItem<K1, K2>
 
 pub struct LinkedList<T, S, K1, K2>(rstd::marker::PhantomData<(T, S, K1, K2)>);
 
-///             LinkedItem              LinkedItem              LinkedItem              LinkedItem
-///             Head                    Item1                   Item2                   Item3
-///             Price:None  <--------   Prev                    Next       -------->    Price 20
-///             Next        -------->   Price: 5   <--------    Prev                    Next        -------->   Price: None
-///   20 <----  Prev                    Next       -------->    Price 10   <--------    Prev
-///                                     Orders
-///                                     o1: Hash -> sell 20 A at price 5
-///                                     o2: Hash -> sell 1 A at price 5
-///                                     o3: Hash -> sell 5 A at price 5
-///                                     o4: Hash -> sell 200 A at price 5
-///                                     o5: Hash -> sell 10 A at price 5
-///                                     when do order matching, o1 will match before o2 and so on
+///             LinkedItem          LinkedItem			LinkedItem          LinkedItem          LinkedItem
+///             Bottom              Buy Order			Head                Sell Order          Top
+///   			Next	    ---->   Price: 8	<----	Prev                Next       ---->    Price: max
+///   max <---- Prev				Next		---->	Price:None  <----   Prev                Next        ---->   Price: 0
+///         	Price:0		<----   Prev     			Next        ---->   Price 10   <----    Prev
+///                                 Orders									Orders
+///                                 o1: Hash -> buy 1@5						o101: Hash -> sell 100@10
+///                                 o2: Hash -> buy 5@5						o102: Hash -> sell 100@5000
+///                                 o3: Hash -> buy 100@5					
+///                                 o4: Hash -> buy 40@5
+///                                 o5: Hash -> buy 1000@5
+///                                     
+/// when do order matching, o1 will match before o2 and so on
 
-/// Self: StorageMap, Key1: TradePairHash, Key2: Price, Value: OrderHash
+// Self: StorageMap, Key1: TradePairHash, Key2: Price, Value: OrderHash
 impl<T, S, K1, K2> LinkedList<T, S, K1, K2> where
 	T: Trait,
 	K1: Encode + Decode + Clone + rstd::borrow::Borrow<<T as system::Trait>::Hash> + Copy,
