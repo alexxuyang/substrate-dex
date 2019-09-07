@@ -62,6 +62,22 @@ pub struct LimitOrder<T> where T: Trait {
 	status: OrderStatus,
 }
 
+#[derive(Encode, Decode, Clone, PartialEq)]
+#[cfg_attr(feature = "std", derive(Debug))]
+pub struct Trade<T> where T: Trait {
+	hash: T::Hash,
+	base: T::Hash,
+	quote: T::Hash,
+	buyer: T::AccountId, // have base
+	seller: T::AccountId, // have quote
+	maker: T::AccountId, // create order first
+	taker: T::AccountId, // create order not first
+	otype: OrderType, // taker order's type
+	price: T::Price, // maker order's price
+	base_amount: T::Balance, // base token amount to exchange
+	quote_amount: T::Balance, // quote token amount to exchange
+}
+
 impl<T> LimitOrder<T> where T: Trait {
 	fn new(base: T::Hash, quote: T::Hash, owner: T::AccountId, price: T::Price, amount: T::Balance, otype: OrderType) -> Self {
 		let nonce = <Nonce<T>>::get();
@@ -78,6 +94,38 @@ impl<T> LimitOrder<T> where T: Trait {
 
 	fn is_finished(&self) -> bool {
 		(self.remained_amount == Zero::zero() && self.status == OrderStatus::Filled) || self.status == OrderStatus::Canceled
+	}
+}
+
+impl<T> Trade<T> where T: Trait {
+	fn new(base: T::Hash, quote: T::Hash, maker_order: &LimitOrder<T>, taker_order: &LimitOrder<T>,
+		base_amount: T::Balance, quote_amount: T::Balance) -> Self {
+		let nonce = <Nonce<T>>::get();
+
+		let hash = (<system::Module<T>>::random_seed(), <system::Module<T>>::block_number(), nonce,
+					maker_order.hash, maker_order.remained_amount, maker_order.owner.clone(),
+					taker_order.hash, taker_order.remained_amount, taker_order.owner.clone())
+			.using_encoded(<T as system::Trait>::Hashing::hash);
+
+		<Nonce<T>>::mutate(|x| *x += 1);
+
+		let buyer;
+		let seller;
+		if taker_order.otype == OrderType::Buy {
+			buyer = taker_order.owner.clone();
+			seller = maker_order.owner.clone();
+		} else {
+			buyer = maker_order.owner.clone();
+			seller = taker_order.owner.clone();
+		}
+
+		Trade {
+			hash, base, quote, buyer, seller, base_amount, quote_amount,
+			maker: maker_order.owner.clone(),
+			taker: taker_order.owner.clone(),
+			otype: taker_order.otype,
+			price: maker_order.price,
+		}
 	}
 }
 
@@ -321,7 +369,9 @@ decl_storage! {
 		OwnedOrders get(owned_order): map (T::AccountId, u64) => Option<T::Hash>;
 		//	AccountId => Index
 		OwnedOrdersIndex get(owned_orders_index): map T::AccountId => u64;
-		
+		// OrderHash => Vec<TradeHash>
+		OrderOwnedTrades get(order_owned_trade): map T::Hash => Option<Vec<T::Hash>>;
+
 		//	(TradePairHash, Index) => OrderHash
 		TradePairOwnedOrders get(trade_pair_owned_order): map (T::Hash, u64) => Option<T::Hash>;
 		//	TradePairHash => Index
@@ -329,6 +379,17 @@ decl_storage! {
 
 		// (TradePairHash, Price) => LinkedItem
 		LinkedItemList get(linked_item): map (T::Hash, Option<T::Price>) => Option<OrderLinkedItem<T>>;
+
+		// TradeHash => Trade
+		Trades get(trade): map T::Hash => Option<Trade<T>>;
+
+		// AccountId => Vec<TradeHash>
+		OwnedTrades get(owned_trade): map T::AccountId => Option<Vec<T::Hash>>;
+		// (AccountId, TradePairHash) => Vec<TradeHash>
+		OwnedTPTrades get(owned_trade_pair_trade): map (T::AccountId, T::Hash) => Option<Vec<T::Hash>>;
+
+		// TradePairHash => Vec<TradeHash>
+		TradePairOwnedTrades get(trade_pair_owned_trade): map T::Hash => Option<Vec<T::Hash>>;
 
 		Nonce: u64;
 	}
@@ -348,7 +409,7 @@ decl_event!(
 		// (accountId, orderHash, baseTokenHash, quoteTokenHash, price, balance)
 		OrderCreated(AccountId, Hash, Hash, Hash, Price, Balance),
 
-		
+
 	}
 );
 
@@ -509,12 +570,6 @@ impl<T: Trait> Module<T> {
 				let mut o = Self::order(o).ok_or("can not get order")?;
 				let ex_amount = order.remained_amount.min(o.remained_amount);
 
-				<token::Module<T>>::do_unfreeze(order.owner.clone(), give, ex_amount)?;
-				<token::Module<T>>::do_unfreeze(o.owner.clone(), have, ex_amount)?;
-
-				<token::Module<T>>::do_transfer(order.owner.clone(), give, o.owner.clone(), ex_amount)?;
-				<token::Module<T>>::do_transfer(o.owner.clone(), have, order.owner.clone(), ex_amount)?;
-
 				if order.remained_amount == order.amount {
 					order.status = OrderStatus::PartialFilled;
 				}
@@ -522,6 +577,12 @@ impl<T: Trait> Module<T> {
 				if o.remained_amount == o.amount {
 					o.status = OrderStatus::PartialFilled;
 				}
+
+				<token::Module<T>>::do_unfreeze(order.owner.clone(), give, ex_amount)?;
+				<token::Module<T>>::do_unfreeze(o.owner.clone(), have, ex_amount)?;
+
+				<token::Module<T>>::do_transfer(order.owner.clone(), give, o.owner.clone(), ex_amount)?;
+				<token::Module<T>>::do_transfer(o.owner.clone(), have, order.owner.clone(), ex_amount)?;
 
 				order.remained_amount = order.remained_amount.checked_sub(&ex_amount).ok_or("substract error")?;
 				o.remained_amount = o.remained_amount.checked_sub(&ex_amount).ok_or("substract error")?;
@@ -535,9 +596,21 @@ impl<T: Trait> Module<T> {
 				}
 
 				<Orders<T>>::insert(order.hash.clone(), order.clone());
-				<Orders<T>>::insert(o.hash.clone(), o);
+				<Orders<T>>::insert(o.hash.clone(), o.clone());
 
-				// order = Self::order(order.hash).ok_or("can not get order")?;
+				// save the trade data
+				let trade = Trade::new(tp.base, tp.quote, &o, &order, ex_amount, ex_amount);
+				<Trades<T>>::insert(trade.hash, trade.clone());
+
+				let mut trades;
+				if let Some(ts) = Self::trade_pair_owned_trade(tp_hash) {
+					trades = ts;
+				} else {
+					trades = Vec::<T::Hash>::new();
+				}
+			
+				trades.push(trade.hash);
+				<TradePairOwnedTrades<T>>::insert(tp_hash, trades);
 
 				if order.status == OrderStatus::Filled {
 					break
@@ -547,6 +620,7 @@ impl<T: Trait> Module<T> {
 			head = <OrderLinkedItemList<T>>::read(tp_hash, Some(item_price));
 		}
 
+		// todo: should remove every single item when finish one order match
 		<OrderLinkedItemList<T>>::remove_items(tp_hash, !otype);
 
 		if order.status == OrderStatus::Filled {
@@ -641,9 +715,11 @@ mod tests {
 		system::GenesisConfig::<Test>::default().build_storage().unwrap().0.into()
 	}
 
-	fn output_order(key: <Test as system::Trait>::Hash) {
+	fn output_order(tp_hash: <Test as system::Trait>::Hash) {
 
-		let mut item = <OrderLinkedItemList<Test>>::read_bottom(key);
+		let mut item = <OrderLinkedItemList<Test>>::read_bottom(tp_hash);
+
+		println!("[Trade Pair Market Orders]");
 
 		loop {
 			if item.price == Some(<Test as Trait>::Price::min_value()) {
@@ -672,11 +748,23 @@ mod tests {
 			if item.next == Some(<Test as Trait>::Price::min_value()) {
 				break;
 			} else {
-				item = OrderLinkedItemList::<Test>::read(key, item.next);
+				item = OrderLinkedItemList::<Test>::read(tp_hash, item.next);
 			}
 		}
 
-		println!("");
+		println!("[Trade Pair Matched Trades]");
+
+		let trades = TradeModule::trade_pair_owned_trade(tp_hash);
+		if let Some(trades) = trades {
+			for hash in trades.iter() {
+				let trade = <Trades<Test>>::get(hash).unwrap();
+				println!("[{}/{}] - {}@{}[{:?}]: [Buyer,Seller][{},{}], [Maker,Taker][{},{}], [Base,Quote][{}, {}]", 
+					trade.quote, trade.base, hash, trade.price, trade.otype, trade.buyer, trade.seller, trade.maker, 
+					trade.taker, trade.base_amount, trade.quote_amount);
+			}
+		}
+
+		println!();
 	}
 
 	#[test]
@@ -1192,10 +1280,24 @@ mod tests {
 
 			output_order(tp_hash);
 
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(ALICE), base, quote, OrderType::Buy, 12, 50));
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(ALICE), base, quote, OrderType::Buy, 9, 15));
 			let order101_hash = TradeModule::owned_order((ALICE, 0)).unwrap();
 			let mut order101 = TradeModule::order(order101_hash).unwrap();
-			assert_eq!(order101.amount, 50);
+			assert_eq!(order101.amount, 15);
+
+			output_order(tp_hash);
+			
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(ALICE), base, quote, OrderType::Buy, 12, 50));
+			let order102_hash = TradeModule::owned_order((ALICE, 1)).unwrap();
+			let mut order102 = TradeModule::order(order102_hash).unwrap();
+			assert_eq!(order102.amount, 50);
+
+			output_order(tp_hash);
+
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(ALICE), base, quote, OrderType::Buy, 13, 2000));
+			let order103_hash = TradeModule::owned_order((ALICE, 2)).unwrap();
+			let mut order103 = TradeModule::order(order103_hash).unwrap();
+			assert_eq!(order103.amount, 2000);
 
 			output_order(tp_hash);
 		});
