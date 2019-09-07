@@ -54,7 +54,13 @@ decl_module! {
         }
 
         pub fn transfer(origin, token_hash: T::Hash, to: T::AccountId, amount: T::Balance) -> Result {
-            Self::do_transfer(origin, token_hash, to, amount)
+            let sender = ensure_signed(origin)?;
+            ensure!(<FreeBalanceOf<T>>::exists((sender.clone(), token_hash)), "sender does not have the token");
+
+            Self::do_transfer(sender.clone(), token_hash, to.clone(), amount)?;
+            Self::deposit_event(RawEvent::Transferd(sender, to, token_hash, amount));
+
+            Ok(())
         }
 
         pub fn freeze(origin, hash: T::Hash, amount: T::Balance) -> Result {
@@ -81,9 +87,6 @@ impl<T: Trait> Module<T> {
 
         let hash = (<system::Module<T>>::random_seed(), sender.clone(), nonce).using_encoded(<T as system::Trait>::Hashing::hash);
 
-        runtime_io::print("hash");
-        runtime_io::print(hash.as_ref());
-
         let token = Token {
             hash: hash.clone(),
             total_supply,
@@ -105,13 +108,10 @@ impl<T: Trait> Module<T> {
         Ok(())
     }
 
-    fn do_transfer(origin: T::Origin, hash: T::Hash, to: T::AccountId, amount: T::Balance) -> Result {
+    pub fn do_transfer(sender: T::AccountId, hash: T::Hash, to: T::AccountId, amount: T::Balance) -> Result {
 
         let token = Self::token(hash);
         ensure!(token.is_some(), "no matching token found");
-
-        let sender = ensure_signed(origin)?;
-        ensure!(<FreeBalanceOf<T>>::exists((sender.clone(), hash.clone())), "sender does not have the token");
 
         let from_amount = Self::balance_of((sender.clone(), hash.clone()));
         ensure!(from_amount >= amount, "sender does not have enough balance");
@@ -133,8 +133,6 @@ impl<T: Trait> Module<T> {
         <FreeBalanceOf<T>>::insert((sender.clone(), hash.clone()), new_from_free_amount);
         <BalanceOf<T>>::insert((to.clone(), hash.clone()), new_to_amount);
         <FreeBalanceOf<T>>::insert((to.clone(), hash.clone()), new_to_free_amount);
-
-        Self::deposit_event(RawEvent::Transferd(sender, to, hash, amount));
 
         Ok(())
     }

@@ -1,9 +1,9 @@
 use support::{decl_module, decl_storage, decl_event, StorageValue, StorageMap, dispatch::Result, ensure, Parameter};
-use runtime_primitives::traits::{SimpleArithmetic, Bounded, Member, Zero};
+use runtime_primitives::traits::{SimpleArithmetic, Bounded, Member, Zero, CheckedSub};
 use system::ensure_signed;
 use parity_codec::{Encode, Decode};
 use runtime_primitives::traits::{Hash};
-use rstd::{prelude::*, result, cmp::Ordering};
+use rstd::{prelude::*, result, ops::Not};
 use crate::token;
 
 pub trait Trait: token::Trait + system::Trait {
@@ -26,6 +26,17 @@ pub struct TradePair<T> where T: Trait {
 pub enum OrderType {
 	Buy,
 	Sell,
+}
+
+impl Not for OrderType {
+	type Output = OrderType;
+
+	fn not(self) -> Self::Output {
+		match self {
+			OrderType::Sell => OrderType::Buy,
+			OrderType::Buy => OrderType::Sell,
+		}
+	}
 }
 
 #[derive(Encode, Decode, Clone, PartialEq)]
@@ -221,15 +232,15 @@ impl<T, S, K1, K2> LinkedList<T, S, K1, K2> where
         };
     }
 
-	pub fn next_match_price(next: Option<K2>, prev: Option<K2>, otype: OrderType) -> Option<K2> {
+	pub fn next_match_price(item: &LinkedItem<K1, K2>, otype: OrderType) -> Option<K2> {
 		if otype == OrderType::Buy {
-			prev
+			item.prev
 		} else {
-			next
+			item.next
 		}
 	}
 
-	pub fn remove_items(key1: K1, otype: OrderType) -> Result {
+	pub fn remove_items(key1: K1, otype: OrderType) {
 		let end_item;
 
 		if otype == OrderType::Buy {
@@ -241,16 +252,17 @@ impl<T, S, K1, K2> LinkedList<T, S, K1, K2> where
 		let mut head = Self::read_head(key1);
 
 		loop {
-			let key2 = Self::next_match_price(head.next, head.prev, otype);
+			let key2 = Self::next_match_price(&head, otype);
 			if key2 == end_item {
 				break;
 			}
 
-			Self::remove_item(key1, key2.unwrap())?;
+			match Self::remove_item(key1, key2.unwrap()) {
+				Ok(_) => {},
+				Err(_) => break,
+			};
 			head = Self::read_head(key1);
 		}
-
-		Ok(())
 	}
 
     // when the order is canceled, it should be remove from Sell / Buy orders
@@ -332,7 +344,11 @@ decl_event!(
 		TradePair = TradePair<T>,
 	{
 		TradePairCreated(AccountId, Hash, TradePair),
-		OrderCreated(AccountId, Hash, Hash, Hash, Price, Balance), // (alice, orderHash, baseTokenHash, quoteTokenHash, price, balance)
+
+		// (accountId, orderHash, baseTokenHash, quoteTokenHash, price, balance)
+		OrderCreated(AccountId, Hash, Hash, Hash, Price, Balance),
+
+		
 	}
 );
 
@@ -345,40 +361,7 @@ decl_module! {
 		}
 
 		pub fn create_limit_order(origin, base: T::Hash, quote: T::Hash, otype: OrderType, price: T::Price, amount: T::Balance) -> Result {
-			let sender = ensure_signed(origin)?;
-
-			let tp_hash = Self::ensure_trade_pair(base, quote)?;
-
-			ensure!(price > Zero::zero() && price < T::Price::max_value(), "price is out of bound");
-			
-			let op_token_hash;
-			match otype {
-				OrderType::Buy => op_token_hash = base,
-				OrderType::Sell => op_token_hash = quote,
-			};
-
-			let order = LimitOrder::new(base, quote, sender.clone(), price, amount, otype);
-			let hash  = order.hash;
-
-			<token::Module<T>>::do_freeze(sender.clone(), op_token_hash, amount)?;
-			<token::Module<T>>::ensure_free_balance(sender.clone(), op_token_hash, amount)?;
-			<Orders<T>>::insert(hash, order.clone());
-
-			let owned_index = Self::owned_orders_index(sender.clone());
-			<OwnedOrders<T>>::insert((sender.clone(), owned_index), hash);
-			<OwnedOrdersIndex<T>>::insert(sender.clone(), owned_index + 1);
-
-			let tp_owned_index = Self::trade_pair_owned_order_index(tp_hash);
-			<TradePairOwnedOrders<T>>::insert((tp_hash, tp_owned_index), hash);
-			<TradePairOwnedOrdersIndex<T>>::insert(tp_hash, tp_owned_index + 1);
-
-			<Nonce<T>>::mutate(|n| *n += 1);
-
-			<OrderLinkedItemList<T>>::append(tp_hash, price, hash, otype);
-
-			Self::deposit_event(RawEvent::OrderCreated(sender.clone(), hash, base, quote, price, amount));
-
-			Ok(())
+			Self::do_create_limit_order(origin, base, quote, otype, price, amount)
 		}
 	}
 }
@@ -432,6 +415,160 @@ impl<T: Trait> Module<T> {
 		Self::deposit_event(RawEvent::TradePairCreated(sender, hash, tp));
 
 		Ok(())
+	}
+
+	fn do_create_limit_order(origin: T::Origin, base: T::Hash, quote: T::Hash, otype: OrderType, price: T::Price, amount: T::Balance) -> Result {
+		let sender = ensure_signed(origin)?;
+
+		let tp_hash = Self::ensure_trade_pair(base, quote)?;
+
+		ensure!(price > Zero::zero() && price < T::Price::max_value(), "price is out of bound");
+		
+		let op_token_hash;
+		match otype {
+			OrderType::Buy => op_token_hash = base,
+			OrderType::Sell => op_token_hash = quote,
+		};
+
+		let order = LimitOrder::new(base, quote, sender.clone(), price, amount, otype);
+		let hash  = order.hash;
+
+		<token::Module<T>>::do_freeze(sender.clone(), op_token_hash, amount)?;
+		<token::Module<T>>::ensure_free_balance(sender.clone(), op_token_hash, amount)?;
+		<Orders<T>>::insert(hash, order.clone());
+		<Nonce<T>>::mutate(|n| *n += 1);
+		Self::deposit_event(RawEvent::OrderCreated(sender.clone(), hash, base, quote, price, amount));
+
+		let owned_index = Self::owned_orders_index(sender.clone());
+		<OwnedOrders<T>>::insert((sender.clone(), owned_index), hash);
+		<OwnedOrdersIndex<T>>::insert(sender.clone(), owned_index + 1);
+
+		let tp_owned_index = Self::trade_pair_owned_order_index(tp_hash);
+		<TradePairOwnedOrders<T>>::insert((tp_hash, tp_owned_index), hash);
+		<TradePairOwnedOrdersIndex<T>>::insert(tp_hash, tp_owned_index + 1);
+
+		// order match
+		let filled = Self::order_match(tp_hash, order.clone())?;
+
+		// add order to the market order list
+		if !filled {
+			<OrderLinkedItemList<T>>::append(tp_hash, price, hash, otype);
+		}
+
+		Ok(())
+	}
+
+	fn order_match(tp_hash: T::Hash, mut order: LimitOrder<T>) -> result::Result<bool, &'static str> {
+		let mut head = <OrderLinkedItemList<T>>::read_head(tp_hash);
+
+		let end_item_price;
+		let otype = order.otype;
+		let oprice = order.price;
+
+		if otype == OrderType::Buy {
+			end_item_price = Some(T::Price::min_value());
+		} else {
+			end_item_price = Some(T::Price::max_value());
+		}
+
+		let tp = Self::trade_pair_by_hash(tp_hash).ok_or("can not get trade pair")?;
+		let give: T::Hash;
+		let have: T::Hash;
+
+		match otype {
+			OrderType::Buy => {
+				give = tp.base;
+				have = tp.quote;
+			},
+			OrderType::Sell => {
+				give = tp.quote;
+				have = tp.base;
+			},
+		};
+
+		loop {
+			if order.status == OrderStatus::Filled {
+				break;
+			}
+
+			let item_price = Self::next_match_price(&head, !otype);
+			
+			if item_price == end_item_price {
+				break;
+			}
+
+			let item_price = item_price.ok_or("can not unwarp item price")?;
+
+			if !Self::price_matched(oprice, otype, item_price) {
+				break
+			}
+
+			let item = <LinkedItemList<T>>::get((tp_hash, Some(item_price))).ok_or("can not unwrap linked list item")?;
+			for o in item.orders.iter() {
+
+				let mut o = Self::order(o).ok_or("can not get order")?;
+				let ex_amount = order.remained_amount.min(o.remained_amount);
+
+				<token::Module<T>>::do_unfreeze(order.owner.clone(), give, ex_amount)?;
+				<token::Module<T>>::do_unfreeze(o.owner.clone(), have, ex_amount)?;
+
+				<token::Module<T>>::do_transfer(order.owner.clone(), give, o.owner.clone(), ex_amount)?;
+				<token::Module<T>>::do_transfer(o.owner.clone(), have, order.owner.clone(), ex_amount)?;
+
+				if order.remained_amount == order.amount {
+					order.status = OrderStatus::PartialFilled;
+				}
+
+				if o.remained_amount == o.amount {
+					o.status = OrderStatus::PartialFilled;
+				}
+
+				order.remained_amount = order.remained_amount.checked_sub(&ex_amount).ok_or("substract error")?;
+				o.remained_amount = o.remained_amount.checked_sub(&ex_amount).ok_or("substract error")?;
+
+				if order.remained_amount == Zero::zero() {
+					order.status = OrderStatus::Filled;
+				}
+
+				if o.remained_amount == Zero::zero() {
+					o.status = OrderStatus::Filled;
+				}
+
+				<Orders<T>>::insert(order.hash.clone(), order.clone());
+				<Orders<T>>::insert(o.hash.clone(), o);
+
+				// order = Self::order(order.hash).ok_or("can not get order")?;
+
+				if order.status == OrderStatus::Filled {
+					break
+				}
+			}
+
+			head = <OrderLinkedItemList<T>>::read(tp_hash, Some(item_price));
+		}
+
+		<OrderLinkedItemList<T>>::remove_items(tp_hash, !otype);
+
+		if order.status == OrderStatus::Filled {
+			Ok(true)
+		} else {
+			Ok(false)
+		}
+	}
+
+	fn next_match_price(item: &OrderLinkedItem<T>, otype: OrderType) -> Option<T::Price> {
+		if otype == OrderType::Buy {
+			item.prev
+		} else {
+			item.next
+		}
+	}
+
+	fn price_matched(order_price: T::Price, order_type: OrderType, linked_item_price: T::Price) -> bool {
+		match order_type {
+			OrderType::Sell => order_price <= linked_item_price,
+			OrderType::Buy => order_price >= linked_item_price,
+		}
 	}
 }
 
@@ -524,7 +661,7 @@ mod tests {
 				match orders.next() {
 					Some(order_hash) => {
 						let order = <Orders<Test>>::get(order_hash).unwrap();
-						print!("({} : {}, {}), ", order.hash, order.amount, order.remained_amount);
+						print!("({}@[{:?}]: {}, {}), ", order.hash, order.status, order.amount, order.remained_amount);
 					},
 					None => break,
 				}
@@ -1002,6 +1139,64 @@ mod tests {
 			// Bottom ==> Price(Some(0)), Next(None), Prev(Some(18446744073709551615)), Orders(0): 
 			// Head ==> Price(None), Next(Some(18446744073709551615)), Prev(Some(0)), Orders(0): 
 			// Top ==> Price(Some(18446744073709551615)), Next(Some(0)), Prev(None), Orders(0):
+			output_order(tp_hash);
+		});
+	}
+
+	#[test]
+	fn order_match_test_case() {
+		with_externalities(&mut new_test_ext(), || {
+			let ALICE = 10;
+			let BOB = 20;
+			let CHARLIE = 30;
+
+			let max = Some(<Test as Trait>::Price::max_value());
+			let min = Some(<Test as Trait>::Price::min_value());
+
+			// token1
+			assert_ok!(TokenModule::issue(Origin::signed(ALICE), b"66".to_vec(), 21000000));
+			let token1_hash = TokenModule::owned_token((ALICE, 0)).unwrap();
+			let token1 = TokenModule::token(token1_hash).unwrap();
+
+			// token2
+			assert_ok!(TokenModule::issue(Origin::signed(BOB), b"77".to_vec(), 10000000));
+			let token2_hash = TokenModule::owned_token((BOB, 0)).unwrap();
+			let token2 = TokenModule::token(token2_hash).unwrap();
+
+			// tradepair
+			let base = token1.hash;
+			let quote = token2.hash;
+			assert_ok!(TradeModule::create_trade_pair(Origin::signed(ALICE), base, quote));
+			let tp_hash = TradeModule::trade_pair_hash_by_base_quote((base, quote)).unwrap();
+			let tp = TradeModule::trade_pair_by_hash(tp_hash).unwrap();
+
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 18, 100));
+			let order1_hash = TradeModule::owned_order((BOB, 0)).unwrap();
+			let mut order1 = TradeModule::order(order1_hash).unwrap();
+			assert_eq!(order1.amount, 100);
+
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 10, 10));
+			let order2_hash = TradeModule::owned_order((BOB, 1)).unwrap();
+			let mut order2 = TradeModule::order(order2_hash).unwrap();
+			assert_eq!(order2.amount, 10);
+
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 11, 10));
+			let order3_hash = TradeModule::owned_order((BOB, 2)).unwrap();
+			let mut order3 = TradeModule::order(order3_hash).unwrap();
+			assert_eq!(order3.amount, 10);
+
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 11, 100));
+			let order3_hash = TradeModule::owned_order((BOB, 3)).unwrap();
+			let mut order3 = TradeModule::order(order3_hash).unwrap();
+			assert_eq!(order3.amount, 100);
+
+			output_order(tp_hash);
+
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(ALICE), base, quote, OrderType::Buy, 12, 50));
+			let order101_hash = TradeModule::owned_order((ALICE, 0)).unwrap();
+			let mut order101 = TradeModule::order(order101_hash).unwrap();
+			assert_eq!(order101.amount, 50);
+
 			output_order(tp_hash);
 		});
 	}
