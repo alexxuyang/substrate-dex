@@ -170,10 +170,6 @@ impl<T, S, K1, K2> LinkedList<T, S, K1, K2> where
         Self::read(key, Some(K2::min_value()))
     }
 
-    pub fn read_top(key: K1) -> LinkedItem<K1, K2> {
-        Self::read(key, Some(K2::max_value()))
-    }
-
     pub fn read(key1: K1, key2: Option<K2>) -> LinkedItem<K1, K2> {
 
         S::get((key1, key2)).unwrap_or_else(|| {
