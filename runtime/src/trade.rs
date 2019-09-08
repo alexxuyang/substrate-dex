@@ -1274,9 +1274,9 @@ mod tests {
 			assert_eq!(order3.amount, 10);
 
 			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 11, 100));
-			let order3_hash = TradeModule::owned_order((BOB, 3)).unwrap();
-			let mut order3 = TradeModule::order(order3_hash).unwrap();
-			assert_eq!(order3.amount, 100);
+			let order4_hash = TradeModule::owned_order((BOB, 3)).unwrap();
+			let mut order4 = TradeModule::order(order4_hash).unwrap();
+			assert_eq!(order4.amount, 100);
 
 			output_order(tp_hash);
 
@@ -1298,6 +1298,13 @@ mod tests {
 			let order103_hash = TradeModule::owned_order((ALICE, 2)).unwrap();
 			let mut order103 = TradeModule::order(order103_hash).unwrap();
 			assert_eq!(order103.amount, 2000);
+
+			output_order(tp_hash);
+
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 9, 5000));
+			let order5_hash = TradeModule::owned_order((BOB, 4)).unwrap();
+			let mut order5 = TradeModule::order(order5_hash).unwrap();
+			assert_eq!(order5.amount, 5000);
 
 			output_order(tp_hash);
 		});
