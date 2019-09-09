@@ -23,6 +23,9 @@ use version::RuntimeVersion;
 #[cfg(feature = "std")]
 use version::NativeVersion;
 
+#[macro_use]
+extern crate uint;
+
 // A few exports that help ease life for downstream crates.
 #[cfg(any(feature = "std", test))]
 pub use runtime_primitives::BuildStorage;
@@ -58,6 +61,7 @@ pub type Nonce = u64;
 mod template;
 mod token;
 mod trade;
+mod types;
 
 /// Opaque types. These are used by the CLI to instantiate machinery that don't need to know
 /// the specifics of the runtime. They can then be made to be agnostic over specific formats

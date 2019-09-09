@@ -55,7 +55,6 @@ decl_module! {
 
         pub fn transfer(origin, token_hash: T::Hash, to: T::AccountId, amount: T::Balance) -> Result {
             let sender = ensure_signed(origin)?;
-            ensure!(<FreeBalanceOf<T>>::exists((sender.clone(), token_hash)), "sender does not have the token");
 
             Self::do_transfer(sender.clone(), token_hash, to.clone(), amount)?;
             Self::deposit_event(RawEvent::Transferd(sender, to, token_hash, amount));
@@ -112,6 +111,8 @@ impl<T: Trait> Module<T> {
 
         let token = Self::token(hash);
         ensure!(token.is_some(), "no matching token found");
+
+        ensure!(<FreeBalanceOf<T>>::exists((sender.clone(), hash)), "sender does not have the token");
 
         let from_amount = Self::balance_of((sender.clone(), hash.clone()));
         ensure!(from_amount >= amount, "sender does not have enough balance");
@@ -286,7 +287,7 @@ mod tests {
 			assert_eq!(TokenModule::free_balance_of((BOB, token.hash)), 100);
 			assert_eq!(TokenModule::freezed_balance_of((BOB, token.hash)), 0);
 
-			assert_err!(TokenModule::transfer(Origin::signed(BOB), H256::from_low_u64_be(2), CHARLIE, 101), "no matching token found");
+			assert_err!(TokenModule::transfer(Origin::signed(BOB), H256::from_low_u64_be(0), CHARLIE, 101), "no matching token found");
 			assert_err!(TokenModule::transfer(Origin::signed(CHARLIE), token.hash, BOB, 101), "sender does not have the token");
 			assert_err!(TokenModule::transfer(Origin::signed(BOB), token.hash, CHARLIE, 101), "sender does not have enough balance");
 		});
