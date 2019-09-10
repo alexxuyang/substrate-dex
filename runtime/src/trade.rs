@@ -553,7 +553,7 @@ mod tests {
 
 		let mut item = <OrderLinkedItemList<Test>>::read_bottom(tp_hash);
 
-		println!("[Trade Pair Market Orders]");
+		println!("[Market Orders]");
 
 		loop {
 			if item.price == Some(<Test as Trait>::Price::min_value()) {
@@ -586,7 +586,7 @@ mod tests {
 			}
 		}
 
-		println!("[Trade Pair Matched Trades]");
+		println!("[Market Trades]");
 
 		let trades = TradeModule::trade_pair_owned_trade(tp_hash);
 		if let Some(trades) = trades {
@@ -1092,21 +1092,21 @@ mod tests {
 			let tp_hash = TradeModule::trade_pair_hash_by_base_quote((base, quote)).unwrap();
 			let tp = TradeModule::trade_pair_by_hash(tp_hash).unwrap();
 
-			let bottom = LinkedItem {
+			let bottom = OrderLinkedItem::<Test> {
 				prev: max,
 				next: None,
 				price: min,
 				orders: Vec::new(),
 			};
 
-			let top = LinkedItem {
+			let top = OrderLinkedItem::<Test> {
 				prev: None,
 				next: min,
 				price: max,
 				orders: Vec::new(),
 			};
 
-			let head = LinkedItem {
+			let head = OrderLinkedItem::<Test> {
 				prev: min,
 				next: max,
 				price: None,
@@ -1142,31 +1142,10 @@ mod tests {
 			assert_ok!(TradeModule::create_limit_order(Origin::signed(ALICE), base, quote, OrderType::Buy, 6, 50));
 			let order101_hash = TradeModule::owned_order((ALICE, 0)).unwrap();
 			let mut order101 = TradeModule::order(order101_hash).unwrap();
-			assert_eq!(order101.amount, 15);
-
-			output_order(tp_hash);
-			
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(ALICE), base, quote, OrderType::Buy, 12, 50));
-			let order102_hash = TradeModule::owned_order((ALICE, 1)).unwrap();
-			let mut order102 = TradeModule::order(order102_hash).unwrap();
-			assert_eq!(order102.amount, 50);
-
-			output_order(tp_hash);
-
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(ALICE), base, quote, OrderType::Buy, 13, 2000));
-			let order103_hash = TradeModule::owned_order((ALICE, 2)).unwrap();
-			let mut order103 = TradeModule::order(order103_hash).unwrap();
-			assert_eq!(order103.amount, 2000);
-
-			output_order(tp_hash);
-
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 9, 5000));
-			let order5_hash = TradeModule::owned_order((BOB, 4)).unwrap();
-			let mut order5 = TradeModule::order(order5_hash).unwrap();
-			assert_eq!(order5.amount, 5000);
+			assert_eq!(order101.amount, 50);
 
 			// bottom
-			let mut item = LinkedItem {
+			let mut item = OrderLinkedItem::<Test> {
 				next: Some(6),
 				prev: max,
 				price: min,
@@ -1180,7 +1159,7 @@ mod tests {
 			let mut v = Vec::new();
 			v.push(order101_hash);
 
-			item = LinkedItem {
+			item = OrderLinkedItem::<Test> {
 				next: None,
 				prev: Some(0),
 				price: Some(6),
@@ -1193,7 +1172,7 @@ mod tests {
 
 			v = Vec::new();
 
-			item = LinkedItem {
+			item = OrderLinkedItem::<Test> {
 				next: Some(10),
 				prev: Some(6),
 				price: None,
@@ -1207,7 +1186,7 @@ mod tests {
 			v = Vec::new();
 			v.push(order2_hash);
 
-			item = LinkedItem {
+			item = OrderLinkedItem::<Test> {
 				next: Some(11),
 				prev: None,
 				price: Some(10),
@@ -1222,7 +1201,7 @@ mod tests {
 			v.push(order3_hash);
 			v.push(order4_hash);
 
-			item = LinkedItem {
+			item = OrderLinkedItem::<Test> {
 				next: Some(18),
 				prev: Some(10),
 				price: Some(11),
@@ -1236,7 +1215,7 @@ mod tests {
 			v = Vec::new();
 			v.push(order1_hash);
 
-			item = LinkedItem {
+			item = OrderLinkedItem::<Test> {
 				next: max,
 				prev: Some(11),
 				price: Some(18),
@@ -1245,7 +1224,7 @@ mod tests {
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
 			// top
-			item = LinkedItem {
+			item = OrderLinkedItem::<Test> {
 				next: min,
 				prev: Some(18),
 				price: max,
@@ -1285,7 +1264,7 @@ mod tests {
 			assert_eq!(order4.status, OrderStatus::PartialFilled);
 
 			// bottom
-			let mut item = LinkedItem {
+			let mut item = OrderLinkedItem::<Test> {
 				next: Some(6),
 				prev: max,
 				price: min,
@@ -1299,7 +1278,7 @@ mod tests {
 			let mut v = Vec::new();
 			v.push(order101_hash);
 
-			item = LinkedItem {
+			item = OrderLinkedItem::<Test> {
 				next: None,
 				prev: Some(0),
 				price: Some(6),
@@ -1312,7 +1291,7 @@ mod tests {
 
 			v = Vec::new();
 
-			item = LinkedItem {
+			item = OrderLinkedItem::<Test> {
 				next: Some(11),
 				prev: Some(6),
 				price: None,
@@ -1326,7 +1305,7 @@ mod tests {
 			v = Vec::new();
 			v.push(order4_hash);
 
-			item = LinkedItem {
+			item = OrderLinkedItem::<Test> {
 				next: Some(18),
 				prev: None,
 				price: Some(11),
@@ -1340,7 +1319,7 @@ mod tests {
 			v = Vec::new();
 			v.push(order1_hash);
 
-			item = LinkedItem {
+			item = OrderLinkedItem::<Test> {
 				next: max,
 				prev: Some(11),
 				price: Some(18),
@@ -1349,7 +1328,7 @@ mod tests {
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
 			// top
-			item = LinkedItem {
+			item = OrderLinkedItem::<Test> {
 				next: min,
 				prev: Some(18),
 				price: max,
@@ -1357,12 +1336,98 @@ mod tests {
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read_top(tp_hash), item);
 
+			let trades = <TradePairOwnedTrades<Test>>::get(tp_hash).unwrap();
+			let mut v = Vec::new();
+			v.push(trades[0]);
+			v.push(trades[1]);
+			v.push(trades[2]);
+
+			assert_eq!(<OwnedTrades<Test>>::get(ALICE), Some(v.clone()));
+			assert_eq!(<OwnedTrades<Test>>::get(BOB), Some(v.clone()));
+
+			assert_eq!(<OwnedTPTrades<Test>>::get((ALICE, tp_hash)), Some(v.clone()));
+			assert_eq!(<OwnedTPTrades<Test>>::get((BOB, tp_hash)), Some(v.clone()));
+
+			assert_eq!(<TradePairOwnedTrades<Test>>::get(tp_hash), Some(v.clone()));
+
+			assert_eq!(<OrderOwnedTrades<Test>>::get(order102_hash).unwrap().len(), 3);
+			assert_eq!(<OrderOwnedTrades<Test>>::get(order102_hash), Some(v));
+
+			let mut v = Vec::new();
+			v.push(trades[0]);
+			assert_eq!(<OrderOwnedTrades<Test>>::get(order2_hash).unwrap().len(), 1);
+			assert_eq!(<OrderOwnedTrades<Test>>::get(order2_hash), Some(v));
+
+			let mut v = Vec::new();
+			v.push(trades[1]);
+			assert_eq!(<OrderOwnedTrades<Test>>::get(order3_hash).unwrap().len(), 1);
+			assert_eq!(<OrderOwnedTrades<Test>>::get(order3_hash), Some(v));
+
+			let mut v = Vec::new();
+			v.push(trades[2]);
+			assert_eq!(<OrderOwnedTrades<Test>>::get(order4_hash).unwrap().len(), 1);
+			assert_eq!(<OrderOwnedTrades<Test>>::get(order4_hash), Some(v));
+
+			assert_eq!(trades.len(), 3);
+			let t1 = <Trades<Test>>::get(trades[0]).unwrap();
+			let trade1 = Trade::<Test> {
+				base: base,
+				quote: quote,
+				buyer: ALICE,
+				seller: BOB,
+				maker: BOB,
+				taker: ALICE,
+				otype: OrderType::Buy,
+				price: 10,
+				base_amount: 11,
+				quote_amount: 11,
+				..t1
+			};
+			assert_eq!(t1, trade1);
+
+			let t2 = <Trades<Test>>::get(trades[1]).unwrap();
+			let trade2 = Trade::<Test> {
+				base: base,
+				quote: quote,
+				buyer: ALICE,
+				seller: BOB,
+				maker: BOB,
+				taker: ALICE,
+				otype: OrderType::Buy,
+				price: 11,
+				base_amount: 10,
+				quote_amount: 10,
+				..t2
+			};
+			assert_eq!(t2, trade2);
+
+			let t3 = <Trades<Test>>::get(trades[2]).unwrap();
+			let trade3 = Trade::<Test> {
+				base: base,
+				quote: quote,
+				buyer: ALICE,
+				seller: BOB,
+				maker: BOB,
+				taker: ALICE,
+				otype: OrderType::Buy,
+				price: 11,
+				base_amount: 30,
+				quote_amount: 30,
+				..t3
+			};
+			assert_eq!(t3, trade3);
+
+			// [Market Orders]
 			// Bottom ==> Price(Some(0)), Next(Some(6)), Prev(Some(18446744073709551615)), Orders(0): 
 			// Price(Some(6)), Next(None), Prev(Some(0)), Orders(1): (0x245e…2743@[Created]: 50, 50), 
 			// Head ==> Price(None), Next(Some(11)), Prev(Some(6)), Orders(0): 
 			// Price(Some(11)), Next(Some(18)), Prev(None), Orders(1): (0x89d7…6e94@[PartialFilled]: 10000, 9970), 
 			// Price(Some(18)), Next(Some(18446744073709551615)), Prev(Some(11)), Orders(1): (0x1396…8c14@[Created]: 200, 200), 
-			// Top ==> Price(Some(18446744073709551615)), Next(Some(0)), Prev(Some(18)), Orders(0):
+			// Top ==> Price(Some(18446744073709551615)), Next(Some(0)), Prev(Some(18)), Orders(0): 
+			// [Market Trades]
+			// [0x72bb…80c0/0x8a33…f642] - 0xf163…386c@10[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][11, 11]
+			// [0x72bb…80c0/0x8a33…f642] - 0xf9c3…edd3@11[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][10, 10]
+			// [0x72bb…80c0/0x8a33…f642] - 0x975e…0c4d@11[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][30, 30]
 			output_order(tp_hash);
 
 			assert_ok!(TradeModule::create_limit_order(Origin::signed(ALICE), base, quote, OrderType::Buy, 18, 13211));
@@ -1383,7 +1448,7 @@ mod tests {
 			assert_eq!(order1.status, OrderStatus::Filled);
 
 			// bottom
-			let mut item = LinkedItem {
+			let mut item = OrderLinkedItem::<Test> {
 				next: Some(6),
 				prev: max,
 				price: min,
@@ -1397,7 +1462,7 @@ mod tests {
 			let mut v = Vec::new();
 			v.push(order101_hash);
 
-			item = LinkedItem {
+			item = OrderLinkedItem::<Test> {
 				next: Some(18),
 				prev: Some(0),
 				price: Some(6),
@@ -1411,7 +1476,7 @@ mod tests {
 			v = Vec::new();
 			v.push(order103_hash);
 
-			item = LinkedItem {
+			item = OrderLinkedItem::<Test> {
 				next: None,
 				prev: Some(6),
 				price: Some(18),
@@ -1424,7 +1489,7 @@ mod tests {
 
 			v = Vec::new();
 
-			item = LinkedItem {
+			item = OrderLinkedItem::<Test> {
 				next: max,
 				prev: Some(18),
 				price: None,
@@ -1433,7 +1498,7 @@ mod tests {
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
 			// top
-			item = LinkedItem {
+			item = OrderLinkedItem::<Test> {
 				next: min,
 				prev: None,
 				price: max,
@@ -1441,11 +1506,133 @@ mod tests {
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read_top(tp_hash), item);
 
+			let trades = <TradePairOwnedTrades<Test>>::get(tp_hash).unwrap();
+			let mut v = Vec::new();
+			v.push(trades[0]);
+			v.push(trades[1]);
+			v.push(trades[2]);
+			v.push(trades[3]);
+			v.push(trades[4]);
+
+			assert_eq!(<OwnedTrades<Test>>::get(ALICE), Some(v.clone()));
+			assert_eq!(<OwnedTrades<Test>>::get(BOB), Some(v.clone()));
+
+			assert_eq!(<OwnedTPTrades<Test>>::get((ALICE, tp_hash)), Some(v.clone()));
+			assert_eq!(<OwnedTPTrades<Test>>::get((BOB, tp_hash)), Some(v.clone()));
+
+			assert_eq!(<TradePairOwnedTrades<Test>>::get(tp_hash), Some(v.clone()));
+
+			let mut v = Vec::new();
+			v.push(trades[3]);
+			v.push(trades[4]);
+			assert_eq!(<OrderOwnedTrades<Test>>::get(order103_hash).unwrap().len(), 2);
+			assert_eq!(<OrderOwnedTrades<Test>>::get(order103_hash), Some(v));
+
+			let mut v = Vec::new();
+			v.push(trades[2]);
+			v.push(trades[3]);
+			assert_eq!(<OrderOwnedTrades<Test>>::get(order4_hash).unwrap().len(), 2);
+			assert_eq!(<OrderOwnedTrades<Test>>::get(order4_hash), Some(v));
+
+			let mut v = Vec::new();
+			v.push(trades[4]);
+			assert_eq!(<OrderOwnedTrades<Test>>::get(order1_hash).unwrap().len(), 1);
+			assert_eq!(<OrderOwnedTrades<Test>>::get(order1_hash), Some(v));
+
+			let trades = <TradePairOwnedTrades<Test>>::get(tp_hash).unwrap();
+			assert_eq!(trades.len(), 5);
+			let t1 = <Trades<Test>>::get(trades[0]).unwrap();
+			let trade1 = Trade::<Test> {
+				base: base,
+				quote: quote,
+				buyer: ALICE,
+				seller: BOB,
+				maker: BOB,
+				taker: ALICE,
+				otype: OrderType::Buy,
+				price: 10,
+				base_amount: 11,
+				quote_amount: 11,
+				..t1
+			};
+			assert_eq!(t1, trade1);
+
+			let t2 = <Trades<Test>>::get(trades[1]).unwrap();
+			let trade2 = Trade::<Test> {
+				base: base,
+				quote: quote,
+				buyer: ALICE,
+				seller: BOB,
+				maker: BOB,
+				taker: ALICE,
+				otype: OrderType::Buy,
+				price: 11,
+				base_amount: 10,
+				quote_amount: 10,
+				..t2
+			};
+			assert_eq!(t2, trade2);
+
+			let t3 = <Trades<Test>>::get(trades[2]).unwrap();
+			let trade3 = Trade::<Test> {
+				base: base,
+				quote: quote,
+				buyer: ALICE,
+				seller: BOB,
+				maker: BOB,
+				taker: ALICE,
+				otype: OrderType::Buy,
+				price: 11,
+				base_amount: 30,
+				quote_amount: 30,
+				..t3
+			};
+			assert_eq!(t3, trade3);
+
+			let t4 = <Trades<Test>>::get(trades[3]).unwrap();
+			let trade4 = Trade::<Test> {
+				base: base,
+				quote: quote,
+				buyer: ALICE,
+				seller: BOB,
+				maker: BOB,
+				taker: ALICE,
+				otype: OrderType::Buy,
+				price: 11,
+				base_amount: 9970,
+				quote_amount: 9970,
+				..t4
+			};
+			assert_eq!(t4, trade4);
+
+			let t5 = <Trades<Test>>::get(trades[4]).unwrap();
+			let trade5 = Trade::<Test> {
+				base: base,
+				quote: quote,
+				buyer: ALICE,
+				seller: BOB,
+				maker: BOB,
+				taker: ALICE,
+				otype: OrderType::Buy,
+				price: 18,
+				base_amount: 200,
+				quote_amount: 200,
+				..t5
+			};
+			assert_eq!(t5, trade5);
+
+			// [Market Orders]
 			// Bottom ==> Price(Some(0)), Next(Some(6)), Prev(Some(18446744073709551615)), Orders(0): 
 			// Price(Some(6)), Next(Some(18)), Prev(Some(0)), Orders(1): (0x245e…2743@[Created]: 50, 50), 
-			// Price(Some(18)), Next(None), Prev(Some(6)), Orders(1): (0x1f31…bb52@[PartialFilled]: 13211, 3041), 
+			// Price(Some(18)), Next(None), Prev(Some(6)), Orders(1): (0xc98d…25d7@[PartialFilled]: 13211, 3041), 
 			// Head ==> Price(None), Next(Some(18446744073709551615)), Prev(Some(18)), Orders(0): 
-			// Top ==> Price(Some(18446744073709551615)), Next(Some(0)), Prev(None), Orders(0):
+			// Top ==> Price(Some(18446744073709551615)), Next(Some(0)), Prev(None), Orders(0): 
+			// [Market Trades]
+			// [0x72bb…80c0/0x8a33…f642] - 0xf163…386c@10[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][11, 11]
+			// [0x72bb…80c0/0x8a33…f642] - 0xf9c3…edd3@11[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][10, 10]
+			// [0x72bb…80c0/0x8a33…f642] - 0x975e…0c4d@11[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][30, 30]
+			// [0x72bb…80c0/0x8a33…f642] - 0x4957…4e49@11[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][9970, 9970]
+			// [0x72bb…80c0/0x8a33…f642] - 0xa190…e0cb@18[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][200, 200]
 			output_order(tp_hash);
 		});
 	}
