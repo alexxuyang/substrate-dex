@@ -138,7 +138,7 @@ decl_storage! {
 		//	TradePairHash => TradePair
 		TradePairsByHash get(trade_pair_by_hash): map T::Hash => Option<TradePair<T>>;
 		// (BaseTokenHash, quoteTokenHash) => TradePairHash
-		TradePairsHashByBasequote get(trade_pair_hash_by_base_quote): map (T::Hash, T::Hash) => Option<T::Hash>;
+		TradePairsHashByBaseQuote get(trade_pair_hash_by_base_quote): map (T::Hash, T::Hash) => Option<T::Hash>;
 
 		// OrderHash => Order
 		Orders get(order): map T::Hash => Option<LimitOrder<T>>;
@@ -185,10 +185,65 @@ decl_event!(
 
 		// (accountId, orderHash, baseTokenHash, quoteTokenHash, price, balance)
 		OrderCreated(AccountId, Hash, Hash, Hash, Price, Balance),
-
-
 	}
 );
+
+impl<T: Trait> OrderOwnedTrades<T> {
+	fn add_trade(order_hash: T::Hash, trade_hash: T::Hash) {
+		let mut trades;
+		if let Some(ts) = Self::get(order_hash) {
+			trades = ts;
+		} else {
+			trades = Vec::<T::Hash>::new();
+		}
+
+		trades.push(trade_hash);
+		<OrderOwnedTrades<T>>::insert(order_hash, trades);
+	}
+}
+
+impl<T: Trait> OwnedTrades<T> {
+	fn add_trade(account_id: T::AccountId, trade_hash: T::Hash) {
+		let mut trades;
+		if let Some(ts) = Self::get(&account_id) {
+			trades = ts;
+		} else {
+			trades = Vec::<T::Hash>::new();
+		}
+
+		trades.push(trade_hash);
+		<OwnedTrades<T>>::insert(account_id, trades);
+	}
+}
+
+impl<T: Trait> TradePairOwnedTrades<T> {
+	fn add_trade(tp_hash: T::Hash, trade_hash: T::Hash) {
+		let mut trades;
+		if let Some(ts) = Self::get(tp_hash) {
+			trades = ts;
+		} else {
+			trades = Vec::<T::Hash>::new();
+		}
+
+		trades.push(trade_hash);
+		<TradePairOwnedTrades<T>>::insert(tp_hash, trades);
+	}
+}
+
+impl<T: Trait> OwnedTPTrades<T> {
+	fn add_trade(account_id: T::AccountId, tp_hash: T::Hash, trade_hash: T::Hash) {
+		// save to trade pair owned trade store
+		let mut trades;
+		if let Some(ts) = Self::get((account_id.clone(), tp_hash)) {
+			trades = ts;
+		} else {
+			trades = Vec::<T::Hash>::new();
+		}
+
+		trades.push(trade_hash);
+		<OwnedTPTrades<T>>::insert((account_id, tp_hash), trades);
+	}
+}
 
 decl_module! {
 	pub struct Module<T: Trait> for enum Call where origin: T::Origin {
@@ -248,7 +303,7 @@ impl<T: Trait> Module<T> {
 
 		<Nonce<T>>::mutate(|n| *n += 1);
 		<TradePairsByHash<T>>::insert(hash, tp.clone());
-		<TradePairsHashByBasequote<T>>::insert((base, quote), hash);
+		<TradePairsHashByBaseQuote<T>>::insert((base, quote), hash);
 
 		Self::deposit_event(RawEvent::TradePairCreated(sender, hash, tp));
 
@@ -379,15 +434,17 @@ impl<T: Trait> Module<T> {
 				let trade = Trade::new(tp.base, tp.quote, &o, &order, ex_amount, ex_amount);
 				<Trades<T>>::insert(trade.hash, trade.clone());
 
-				let mut trades;
-				if let Some(ts) = Self::trade_pair_owned_trade(tp_hash) {
-					trades = ts;
-				} else {
-					trades = Vec::<T::Hash>::new();
-				}
-			
-				trades.push(trade.hash);
-				<TradePairOwnedTrades<T>>::insert(tp_hash, trades);
+				// save trade reference data to store
+				<OrderOwnedTrades<T>>::add_trade(order.hash, trade.hash);
+				<OrderOwnedTrades<T>>::add_trade(o.hash, trade.hash);
+
+				<OwnedTrades<T>>::add_trade(order.owner.clone(), trade.hash);
+				<OwnedTrades<T>>::add_trade(o.owner.clone(), trade.hash);
+
+				<OwnedTPTrades<T>>::add_trade(order.owner.clone(), tp_hash, trade.hash);
+				<OwnedTPTrades<T>>::add_trade(o.owner.clone(), tp_hash, trade.hash);
+
+				<TradePairOwnedTrades<T>>::add_trade(tp_hash, trade.hash);
 
 				if order.status == OrderStatus::Filled {
 					break
