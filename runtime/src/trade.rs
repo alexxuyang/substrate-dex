@@ -1156,7 +1156,7 @@ mod tests {
 	}
 
 	#[test]
-	fn order_match_test_case() {
+	fn order_match_linked_list_test_case() {
 		with_externalities(&mut new_test_ext(), || {
 			let ALICE = 10;
 			let BOB = 20;
