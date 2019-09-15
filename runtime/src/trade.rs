@@ -1,5 +1,6 @@
 use support::{decl_module, decl_storage, decl_event, StorageValue, StorageMap, dispatch::Result, ensure, Parameter};
 use runtime_primitives::{Perbill, traits::{SimpleArithmetic, Bounded, Member, Zero, CheckedSub}};
+use primitives::{U256};
 use system::ensure_signed;
 use parity_codec::{Encode, Decode};
 use runtime_primitives::traits::{Hash, As};
@@ -262,7 +263,13 @@ decl_module! {
 }
 
 impl<T: Trait> Module<T> {
-	fn ensure_under_bound(otype: OrderType, price:T::Price, amount: T::Balance) -> Result {
+	fn ensure_bounds(price: T::Price, amount: T::Balance) -> Result {
+		ensure!(price > Zero::zero() && price <= T::Price::max_value(), "price bounds check failed");
+		ensure!(amount > Zero::zero() && amount <= T::Balance::max_value(), "amount bound check failed");
+		Ok(())
+	}
+
+	fn ensure_under_bound(otype: OrderType, price: T::Price, amount: T::Balance) -> Result {
 		let r: u64;
 
 		match otype {
@@ -277,6 +284,31 @@ impl<T: Trait> Module<T> {
 		ensure!(r != 0, "under bound check failed");
 
 		Ok(())
+	}
+
+	fn ensure_amount_zero_digits(otype: OrderType, price:T::Price, amount: T::Balance) -> Result {
+		let price_u256 = U256::from(price.as_());
+		let amount_u256 = U256::from(amount.as_());
+		let price_factor_u256 = U256::from(PRICE_FACTOR);
+
+		let amount_v2: U256;
+
+		match otype {
+			OrderType::Buy => {
+				let r = amount_u256 * price_factor_u256 / price_u256;
+				amount_v2 = r * price_u256 / price_factor_u256;
+			},
+			OrderType::Sell => {
+				let r = amount_u256 * price_u256 / price_factor_u256;
+				amount_v2 = r * price_factor_u256 / price_u256;
+			},
+		}
+
+		if amount_u256 == amount_v2 {
+			return Ok(())
+		} else {
+			return Err("amount have digits parts")
+		}
 	}
 
 	fn ensure_trade_pair(base: T::Hash, quote: T::Hash) -> result::Result<T::Hash, &'static str> {
@@ -331,13 +363,12 @@ impl<T: Trait> Module<T> {
 
 	fn do_create_limit_order(origin: T::Origin, base: T::Hash, quote: T::Hash, otype: OrderType, price: T::Price, amount: T::Balance) -> Result {
 		let sender = ensure_signed(origin)?;
-
-		let tp_hash = Self::ensure_trade_pair(base, quote)?;
-
-		ensure!(price > Zero::zero() && price < T::Price::max_value(), "price is out of bound");
 		
+		Self::ensure_bounds(price, amount)?;
 		Self::ensure_under_bound(otype, price, amount)?;
 
+		let tp_hash = Self::ensure_trade_pair(base, quote)?;
+		
 		let op_token_hash;
 		match otype {
 			OrderType::Buy => op_token_hash = base,
@@ -1841,6 +1872,33 @@ mod tests {
 			let result = TradeModule::calculate_ex_amount(&order1, &order2).unwrap();
 			assert_eq!(result.0, 101);
 			assert_eq!(result.1, 100);
+		});
+	}
+
+	#[test]
+	fn ensure_amount_zero_digits_test_case() {
+		with_externalities(&mut new_test_ext(), || {
+			assert_eq!(1, 1);
+
+			let price = <Test as Trait>::Price::sa(25010000); // 0.2501
+			let amount = <Test as balances::Trait>::Balance::sa(2501);
+			let otype = OrderType::Buy;
+			assert_ok!(TradeModule::ensure_amount_zero_digits(otype, price, amount));
+			
+			let price = <Test as Trait>::Price::sa(25010000); // 0.2501
+			let amount = <Test as balances::Trait>::Balance::sa(2500);
+			let otype = OrderType::Buy;
+			assert_err!(TradeModule::ensure_amount_zero_digits(otype, price, amount), "amount have digits parts");
+
+			let price = <Test as Trait>::Price::sa(25000000); // 0.25
+			let amount = <Test as balances::Trait>::Balance::sa(24);
+			let otype = OrderType::Sell;
+			assert_ok!(TradeModule::ensure_amount_zero_digits(otype, price, amount));
+			
+			let price = <Test as Trait>::Price::sa(25000000); // 0.25
+			let amount = <Test as balances::Trait>::Balance::sa(21);
+			let otype = OrderType::Sell;
+			assert_err!(TradeModule::ensure_amount_zero_digits(otype, price, amount), "amount have digits parts");
 		});
 	}
 }
