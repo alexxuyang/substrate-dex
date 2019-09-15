@@ -277,23 +277,6 @@ impl<T: Trait> Module<T> {
 		Ok(())
 	}
 
-	fn ensure_under_bound(otype: OrderType, price: T::Price, amount: T::Balance) -> Result {
-		let r: u64;
-
-		match otype {
-			OrderType::Buy => {
-				r = amount.as_() * PRICE_FACTOR / price.as_();
-			},
-			OrderType::Sell => {
-				r = amount.as_() * price.as_() / PRICE_FACTOR;
-			},
-		}
-
-		ensure!(r != 0, "under bound check failed");
-
-		Ok(())
-	}
-
 	fn ensure_counterparty_amount_bounds(otype: OrderType, price:T::Price, amount: T::Balance) 
 		-> result::Result<T::Balance, &'static str> {
 		
