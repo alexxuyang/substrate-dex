@@ -695,7 +695,8 @@ mod tests {
 				match orders.next() {
 					Some(order_hash) => {
 						let order = <Orders<Test>>::get(order_hash).unwrap();
-						print!("({}@[{:?}]: {}, {}), ", order.hash, order.status, order.sell_amount, order.remained_sell_amount);
+						print!("({}@[{:?}]: Sell[{}, {}], Buy[{}, {}]), ", order.hash, order.status, 
+							order.sell_amount, order.remained_sell_amount, order.buy_amount, order.remained_buy_amount);
 					},
 					None => break,
 				}
@@ -1256,30 +1257,45 @@ mod tests {
 			// [Market Trades]
 			output_order(tp_hash);
 
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 18000000, 200));
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 18_000_000, 200));
 			let order1_hash = TradeModule::owned_order((BOB, 0)).unwrap();
 			let mut order1 = TradeModule::order(order1_hash).unwrap();
 			assert_eq!(order1.sell_amount, 200);
+			assert_eq!(order1.remained_sell_amount, 200);
+			assert_eq!(order1.buy_amount, 36);
+			assert_eq!(order1.remained_buy_amount, 36);
 
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 10000000, 11));
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 10_000_000, 10));
 			let order2_hash = TradeModule::owned_order((BOB, 1)).unwrap();
 			let mut order2 = TradeModule::order(order2_hash).unwrap();
-			assert_eq!(order2.sell_amount, 11);
+			assert_eq!(order2.sell_amount, 10);
+			assert_eq!(order2.remained_sell_amount, 10);
+			assert_eq!(order2.buy_amount, 1);
+			assert_eq!(order2.remained_buy_amount, 1);
 
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 11000000, 10));
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 11_000_000, 100));
 			let order3_hash = TradeModule::owned_order((BOB, 2)).unwrap();
 			let mut order3 = TradeModule::order(order3_hash).unwrap();
-			assert_eq!(order3.sell_amount, 10);
+			assert_eq!(order3.sell_amount, 100);
+			assert_eq!(order3.remained_sell_amount, 100);
+			assert_eq!(order3.buy_amount, 11);
+			assert_eq!(order3.remained_buy_amount, 11);
 
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 11000000, 10000));
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 11_000_000, 10000));
 			let order4_hash = TradeModule::owned_order((BOB, 3)).unwrap();
 			let mut order4 = TradeModule::order(order4_hash).unwrap();
 			assert_eq!(order4.sell_amount, 10000);
+			assert_eq!(order4.remained_sell_amount, 10000);
+			assert_eq!(order4.buy_amount, 1100);
+			assert_eq!(order4.remained_buy_amount, 1100);
 
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(ALICE), base, quote, OrderType::Buy, 6000000, 50));
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(ALICE), base, quote, OrderType::Buy, 6_000_000, 24));
 			let order101_hash = TradeModule::owned_order((ALICE, 0)).unwrap();
 			let mut order101 = TradeModule::order(order101_hash).unwrap();
-			assert_eq!(order101.sell_amount, 50);
+			assert_eq!(order101.sell_amount, 24);
+			assert_eq!(order101.remained_sell_amount, 24);
+			assert_eq!(order101.buy_amount, 400);
+			assert_eq!(order101.remained_buy_amount, 400);
 
 			// bottom
 			let mut item = OrderLinkedItem::<Test> {
@@ -1369,38 +1385,47 @@ mod tests {
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read_top(tp_hash), item);
 
+
 			// [Market Orders]
 			// Bottom ==> Price(Some(0)), Next(Some(6000000)), Prev(Some(18446744073709551615)), Orders(0): 
-			// Price(Some(6000000)), Next(None), Prev(Some(0)), Orders(1): (0x3762…e537@[Created]: 50, 50), 
+			// Price(Some(6000000)), Next(None), Prev(Some(0)), Orders(1): (0x39ea…f183@[Created]: Sell[24, 24], Buy[400, 400]), 
 			// Head ==> Price(None), Next(Some(10000000)), Prev(Some(6000000)), Orders(0): 
-			// Price(Some(10000000)), Next(Some(11000000)), Prev(None), Orders(1): (0xbe2b…9cf5@[Created]: 11, 11), 
-			// Price(Some(11000000)), Next(Some(18000000)), Prev(Some(10000000)), Orders(2): (0xb383…6092@[Created]: 10, 10), (0x2a56…7abe@[Created]: 10000, 10000), 
-			// Price(Some(18000000)), Next(Some(18446744073709551615)), Prev(Some(11000000)), Orders(1): (0x8f2a…03ed@[Created]: 200, 200), 
+			// Price(Some(10000000)), Next(Some(11000000)), Prev(None), Orders(1): (0x2491…b0ff@[Created]: Sell[10, 10], Buy[1, 1]), 
+			// Price(Some(11000000)), Next(Some(18000000)), Prev(Some(10000000)), Orders(2): (0xdf61…f22c@[Created]: Sell[100, 100], Buy[11, 11]), (0xe7d6…07ae@[Created]: Sell[10000, 10000], Buy[1100, 1100]), 
+			// Price(Some(18000000)), Next(Some(18446744073709551615)), Prev(Some(11000000)), Orders(1): (0xe7da…ee16@[Created]: Sell[200, 200], Buy[36, 36]), 
 			// Top ==> Price(Some(18446744073709551615)), Next(Some(0)), Prev(Some(18000000)), Orders(0): 
 			// [Market Trades]
 			output_order(tp_hash);
 	
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(ALICE), base, quote, OrderType::Buy, 11000000, 51));
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(ALICE), base, quote, OrderType::Buy, 11_000_000, 55));
 
 			let order102_hash = TradeModule::owned_order((ALICE, 1)).unwrap();
 			let mut order102 = TradeModule::order(order102_hash).unwrap();
-			assert_eq!(order102.sell_amount, 51);
+			assert_eq!(order102.sell_amount, 55);
 			assert_eq!(order102.remained_sell_amount, 0);
+			assert_eq!(order102.buy_amount, 500);
+			assert_eq!(order102.remained_buy_amount, 0);
 			assert_eq!(order102.status, OrderStatus::Filled);
 
 			order2 = TradeModule::order(order2_hash).unwrap();
-			assert_eq!(order2.sell_amount, 11);
+			assert_eq!(order2.sell_amount, 10);
 			assert_eq!(order2.remained_sell_amount, 0);
+			assert_eq!(order2.buy_amount, 1);
+			assert_eq!(order2.remained_buy_amount, 0);
 			assert_eq!(order2.status, OrderStatus::Filled);
 
 			order3 = TradeModule::order(order3_hash).unwrap();
-			assert_eq!(order3.sell_amount, 10);
+			assert_eq!(order3.sell_amount, 100);
 			assert_eq!(order3.remained_sell_amount, 0);
+			assert_eq!(order3.buy_amount, 11);
+			assert_eq!(order3.remained_buy_amount, 0);
 			assert_eq!(order3.status, OrderStatus::Filled);
 
 			order4 = TradeModule::order(order4_hash).unwrap();
 			assert_eq!(order4.sell_amount, 10000);
-			assert_eq!(order4.remained_sell_amount, 10000 - ((51 - 1 - 1) as f64 / 0.11 as f64) as u128);
+			assert_eq!(order4.remained_sell_amount, 9610);
+			assert_eq!(order4.buy_amount, 1100);
+			assert_eq!(order4.remained_buy_amount, 1057);
 			assert_eq!(order4.status, OrderStatus::PartialFilled);
 
 			// bottom
@@ -1518,9 +1543,9 @@ mod tests {
 				maker: BOB,
 				taker: ALICE,
 				otype: OrderType::Buy,
-				price: 10000000,
+				price: 10_000_000,
 				base_amount: 1,
-				quote_amount: 11,
+				quote_amount: 10,
 				..t1
 			};
 			assert_eq!(t1, trade1);
@@ -1535,8 +1560,8 @@ mod tests {
 				taker: ALICE,
 				otype: OrderType::Buy,
 				price: 11000000,
-				base_amount: 1,
-				quote_amount: 10,
+				base_amount: 11,
+				quote_amount: 100,
 				..t2
 			};
 			assert_eq!(t2, trade2);
@@ -1551,43 +1576,49 @@ mod tests {
 				taker: ALICE,
 				otype: OrderType::Buy,
 				price: 11000000,
-				base_amount: 49,
-				quote_amount: 445,
+				base_amount: 43,
+				quote_amount: 390,
 				..t3
 			};
 			assert_eq!(t3, trade3);
 
-			assert_eq!(TokenModule::balance_of((ALICE, quote)), 466);
-			assert_eq!(TokenModule::balance_of((BOB, base)), 51);
+			assert_eq!(TokenModule::balance_of((ALICE, quote)), 500);
+			assert_eq!(TokenModule::balance_of((BOB, base)), 55);
 
 			// [Market Orders]
 			// Bottom ==> Price(Some(0)), Next(Some(6000000)), Prev(Some(18446744073709551615)), Orders(0): 
-			// Price(Some(6000000)), Next(None), Prev(Some(0)), Orders(1): (0x3762…e537@[Created]: 50, 50), 
+			// Price(Some(6000000)), Next(None), Prev(Some(0)), Orders(1): (0x39ea…f183@[Created]: Sell[24, 24], Buy[400, 400]), 
 			// Head ==> Price(None), Next(Some(11000000)), Prev(Some(6000000)), Orders(0): 
-			// Price(Some(11000000)), Next(Some(18000000)), Prev(None), Orders(1): (0x2a56…7abe@[PartialFilled]: 10000, 9555), 
-			// Price(Some(18000000)), Next(Some(18446744073709551615)), Prev(Some(11000000)), Orders(1): (0x8f2a…03ed@[Created]: 200, 200), 
+			// Price(Some(11000000)), Next(Some(18000000)), Prev(None), Orders(1): (0xe7d6…07ae@[PartialFilled]: Sell[10000, 9610], Buy[1100, 1057]), 
+			// Price(Some(18000000)), Next(Some(18446744073709551615)), Prev(Some(11000000)), Orders(1): (0xe7da…ee16@[Created]: Sell[200, 200], Buy[36, 36]), 
 			// Top ==> Price(Some(18446744073709551615)), Next(Some(0)), Prev(Some(18000000)), Orders(0): 
 			// [Market Trades]
-			// [0x72bb…80c0/0x8a33…f642] - 0x770b…84d0@10000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][1, 11]
-			// [0x72bb…80c0/0x8a33…f642] - 0x1c17…cb70@11000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][1, 10]
-			// [0x72bb…80c0/0x8a33…f642] - 0x5c6a…3256@11000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][49, 445]
+			// [0x72bb…80c0/0x8a33…f642] - 0x3fdf…4371@10000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][1, 10]
+			// [0x72bb…80c0/0x8a33…f642] - 0xad18…fab8@11000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][11, 100]
+			// [0x72bb…80c0/0x8a33…f642] - 0x1f02…44c7@11000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][43, 390]
 			output_order(tp_hash);
 
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(ALICE), base, quote, OrderType::Buy, 18000000, 13211));
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(ALICE), base, quote, OrderType::Buy, 18_000_000, 13212));
 			let order103_hash = TradeModule::owned_order((ALICE, 2)).unwrap();
 			let mut order103 = TradeModule::order(order103_hash).unwrap();
-			assert_eq!(order103.sell_amount, 13211);
-			assert_eq!(order103.remained_sell_amount, 12124);
+			assert_eq!(order103.sell_amount, 13212);
+			assert_eq!(order103.remained_sell_amount, 13212 - 1057 - 36);
+			assert_eq!(order103.buy_amount, 73400);
+			assert_eq!(order103.remained_buy_amount, 73400 - 9610 - 200);
 			assert_eq!(order103.status, OrderStatus::PartialFilled);
 
 			order4 = TradeModule::order(order4_hash).unwrap();
 			assert_eq!(order4.sell_amount, 10000);
 			assert_eq!(order4.remained_sell_amount, 0);
+			assert_eq!(order4.buy_amount, 1100);
+			assert_eq!(order4.remained_buy_amount, 0);
 			assert_eq!(order4.status, OrderStatus::Filled);
 
 			order1 = TradeModule::order(order1_hash).unwrap();
 			assert_eq!(order1.sell_amount, 200);
 			assert_eq!(order1.remained_sell_amount, 0);
+			assert_eq!(order1.buy_amount, 36);
+			assert_eq!(order1.remained_buy_amount, 0);
 			assert_eq!(order1.status, OrderStatus::Filled);
 
 			// bottom
@@ -1693,9 +1724,9 @@ mod tests {
 				maker: BOB,
 				taker: ALICE,
 				otype: OrderType::Buy,
-				price: 10000000,
+				price: 10_000_000,
 				base_amount: 1,
-				quote_amount: 11,
+				quote_amount: 10,
 				..t1
 			};
 			assert_eq!(t1, trade1);
@@ -1710,8 +1741,8 @@ mod tests {
 				taker: ALICE,
 				otype: OrderType::Buy,
 				price: 11000000,
-				base_amount: 1,
-				quote_amount: 10,
+				base_amount: 11,
+				quote_amount: 100,
 				..t2
 			};
 			assert_eq!(t2, trade2);
@@ -1726,8 +1757,8 @@ mod tests {
 				taker: ALICE,
 				otype: OrderType::Buy,
 				price: 11000000,
-				base_amount: 49,
-				quote_amount: 445,
+				base_amount: 43,
+				quote_amount: 390,
 				..t3
 			};
 			assert_eq!(t3, trade3);
@@ -1742,8 +1773,8 @@ mod tests {
 				taker: ALICE,
 				otype: OrderType::Buy,
 				price: 11000000,
-				base_amount: 1051,
-				quote_amount: 9555,
+				base_amount: 1057,
+				quote_amount: 9610,
 				..t4
 			};
 			assert_eq!(t4, trade4);
@@ -1764,21 +1795,21 @@ mod tests {
 			};
 			assert_eq!(t5, trade5);
 
-			assert_eq!(TokenModule::balance_of((ALICE, quote)), 466 + 9555 + 200);
-			assert_eq!(TokenModule::balance_of((BOB, base)), 51 + 1051 + 36);
+			assert_eq!(TokenModule::balance_of((ALICE, quote)), 10 + 100 + 10000 + 200);
+			assert_eq!(TokenModule::balance_of((BOB, base)), 1 + 11 + 1100 + 36);
 
 			// [Market Orders]
 			// Bottom ==> Price(Some(0)), Next(Some(6000000)), Prev(Some(18446744073709551615)), Orders(0): 
-			// Price(Some(6000000)), Next(Some(18000000)), Prev(Some(0)), Orders(1): (0x3762…e537@[Created]: 50, 50), 
-			// Price(Some(18000000)), Next(None), Prev(Some(6000000)), Orders(1): (0x036d…71be@[PartialFilled]: 13211, 12124), 
+			// Price(Some(6000000)), Next(Some(18000000)), Prev(Some(0)), Orders(1): (0x39ea…f183@[Created]: Sell[24, 24], Buy[400, 400]), 
+			// Price(Some(18000000)), Next(None), Prev(Some(6000000)), Orders(1): (0x78ae…6f02@[PartialFilled]: Sell[13212, 12119], Buy[73400, 63590]), 
 			// Head ==> Price(None), Next(Some(18446744073709551615)), Prev(Some(18000000)), Orders(0): 
 			// Top ==> Price(Some(18446744073709551615)), Next(Some(0)), Prev(None), Orders(0): 
 			// [Market Trades]
-			// [0x72bb…80c0/0x8a33…f642] - 0x770b…84d0@10000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][1, 11]
-			// [0x72bb…80c0/0x8a33…f642] - 0x1c17…cb70@11000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][1, 10]
-			// [0x72bb…80c0/0x8a33…f642] - 0x5c6a…3256@11000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][49, 445]
-			// [0x72bb…80c0/0x8a33…f642] - 0xf264…1328@11000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][1051, 9555]
-			// [0x72bb…80c0/0x8a33…f642] - 0xb6b0…acc4@18000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][36, 200]
+			// [0x72bb…80c0/0x8a33…f642] - 0x3fdf…4371@10000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][1, 10]
+			// [0x72bb…80c0/0x8a33…f642] - 0xad18…fab8@11000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][11, 100]
+			// [0x72bb…80c0/0x8a33…f642] - 0x1f02…44c7@11000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][43, 390]
+			// [0x72bb…80c0/0x8a33…f642] - 0x7794…d2a9@11000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][1057, 9610]
+			// [0x72bb…80c0/0x8a33…f642] - 0x5759…febf@18000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][36, 200]
 			output_order(tp_hash);
 		});
 	}
