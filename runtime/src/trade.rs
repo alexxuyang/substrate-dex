@@ -21,8 +21,6 @@ pub struct TradePair<T> where T: Trait {
 	hash: T::Hash,
 	base: T::Hash,
 	quote: T::Hash,
-	buy_one_price: T::Price,
-	sell_one_price: T::Price,
 }
 
 #[derive(Encode, Decode, Clone, Copy, PartialEq)]
@@ -349,8 +347,6 @@ impl<T: Trait> Module<T> {
 
 		let tp = TradePair {
 			hash, base, quote,
-			buy_one_price: Zero::zero(),
-			sell_one_price: Zero::zero(),
 		};
 
 		<Nonce<T>>::mutate(|n| *n += 1);
