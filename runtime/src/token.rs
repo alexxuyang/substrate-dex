@@ -39,7 +39,9 @@ decl_module! {
 		}
 
 		fn transfer(origin, to: T::AccountId, hash: T::Hash, amount: T::Balance) -> Result {
-			Self::do_transfer(origin, to, hash, amount)
+			let sender = ensure_signed(origin)?;
+
+			Self::do_transfer(sender, to, hash, amount)
 		}
 
 		fn freeze(origin, hash: T::Hash, amount: T::Balance) -> Result {
@@ -87,8 +89,8 @@ impl<T: Trait> Module<T> {
 		Ok(())
 	}
 
-	fn do_transfer(origin: T::Origin, to: T::AccountId, hash: T::Hash, amount: T::Balance) -> Result {
-		let sender = ensure_signed(origin)?;
+	pub fn do_transfer(sender: T::AccountId, to: T::AccountId, hash: T::Hash, amount: T::Balance) -> Result {
+		// let sender = ensure_signed(origin)?;
 
 		let token = Self::token(hash);
 		ensure!(token.is_some(), "no matching token found");
@@ -142,7 +144,7 @@ impl<T: Trait> Module<T> {
         Ok(())
     }
 
-    fn do_unfreeze(sender: T::AccountId, hash: T::Hash, amount: T::Balance) -> Result {
+    pub fn do_unfreeze(sender: T::AccountId, hash: T::Hash, amount: T::Balance) -> Result {
         
         let token = Self::token(hash);
         ensure!(token.is_some(), "no matching token found");
