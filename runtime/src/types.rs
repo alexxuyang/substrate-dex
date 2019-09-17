@@ -182,9 +182,10 @@ impl<T, S, K1, K2> LinkedList<T, S, K1, K2> where
 			}
 
 			match Self::remove_item(key1, key2.unwrap()) {
-				Ok(_) => {},
 				Err(_) => break,
+				_ => {},
 			};
+
 			head = Self::read_head(key1);
 		}
 	}
