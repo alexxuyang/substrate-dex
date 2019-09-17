@@ -106,7 +106,7 @@ impl<T> LimitOrder<T> where T: Trait {
 	}
 
 	pub fn is_finished(&self) -> bool {
-		(self.remained_sell_amount == Zero::zero() && self.status == OrderStatus::Filled) || self.status == OrderStatus::Canceled
+		(self.remained_buy_amount == Zero::zero() && self.status == OrderStatus::Filled) || self.status == OrderStatus::Canceled
 	}
 }
 
@@ -500,6 +500,8 @@ impl<T: Trait> Module<T> {
 						<token::Module<T>>::do_unfreeze(order.owner.clone(), give, order.remained_sell_amount)?;
 						order.remained_sell_amount = Zero::zero();
 					}
+
+					ensure!(order.is_finished(), "order is not finished");
 				}
 
 				if o.remained_buy_amount == Zero::zero() {
@@ -508,6 +510,8 @@ impl<T: Trait> Module<T> {
 						<token::Module<T>>::do_unfreeze(o.owner.clone(), have, o.remained_sell_amount)?;
 						o.remained_sell_amount = Zero::zero();
 					}
+
+					ensure!(o.is_finished(), "order is not finished");
 				}
 
 				<Orders<T>>::insert(order.hash.clone(), order.clone());
@@ -515,6 +519,12 @@ impl<T: Trait> Module<T> {
 
 				// save the trade pair lastest matched price
 				Self::set_tp_latest_matched_price(tp_hash, Some(o.price))?;
+
+				// remove the matched order
+				<OrderLinkedItemList<T>>::remove_items(tp_hash, !otype);
+
+				// set trade pair buy/sell price after a match
+				Self::set_tp_buy_one_or_sell_one_price(tp_hash, !order.otype)?;
 
 				// save the trade data
 				let trade = Trade::new(tp.base, tp.quote, &o, &order, base_qty, quote_qty);
@@ -537,14 +547,8 @@ impl<T: Trait> Module<T> {
 				}
 			}
 
-			head = <OrderLinkedItemList<T>>::read(tp_hash, Some(item_price));
+			head = <OrderLinkedItemList<T>>::read_head(tp_hash);
 		}
-
-		// todo: should remove every single item when finish one order match
-		<OrderLinkedItemList<T>>::remove_items(tp_hash, !otype);
-
-		// set trade pair buy/sell price after matched a price level
-		Self::set_tp_buy_one_or_sell_one_price(tp_hash, !order.otype)?;
 
 		if order.status == OrderStatus::Filled {
 			Ok(true)
