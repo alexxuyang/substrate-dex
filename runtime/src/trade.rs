@@ -21,6 +21,9 @@ pub struct TradePair<T> where T: Trait {
 	hash: T::Hash,
 	base: T::Hash,
 	quote: T::Hash,
+	buy_one_price: Option<T::Price>,
+	sell_one_price: Option<T::Price>,
+	latest_matched_price: Option<T::Price>,
 }
 
 #[derive(Encode, Decode, Clone, Copy, PartialEq)]
@@ -145,7 +148,7 @@ type OrderLinkedItemList<T> = types::LinkedList<T, LinkedItemList<T>, <T as syst
 decl_storage! {
 	trait Store for Module<T: Trait> as trade {
 		//	TradePairHash => TradePair
-		TradePairsByHash get(trade_pair_by_hash): map T::Hash => Option<TradePair<T>>;
+		TradePairs get(trade_pair): map T::Hash => Option<TradePair<T>>;
 		// (BaseTokenHash, quoteTokenHash) => TradePairHash
 		TradePairsHashByBaseQuote get(trade_pair_hash_by_base_quote): map (T::Hash, T::Hash) => Option<T::Hash>;
 
@@ -347,10 +350,13 @@ impl<T: Trait> Module<T> {
 
 		let tp = TradePair {
 			hash, base, quote,
+			buy_one_price: None,
+			sell_one_price: None,
+			latest_matched_price: None,
 		};
 
 		<Nonce<T>>::mutate(|n| *n += 1);
-		<TradePairsByHash<T>>::insert(hash, tp.clone());
+		<TradePairs<T>>::insert(hash, tp.clone());
 		<TradePairsHashByBaseQuote<T>>::insert((base, quote), hash);
 
 		Self::deposit_event(RawEvent::TradePairCreated(sender, hash, tp));
@@ -397,6 +403,7 @@ impl<T: Trait> Module<T> {
 		// add order to the market order list
 		if !filled {
 			<OrderLinkedItemList<T>>::append(tp_hash, price, hash, otype);
+			Self::set_tp_buy_one_or_sell_one_price(tp_hash, otype)?;
 		}
 
 		Ok(())
@@ -415,7 +422,7 @@ impl<T: Trait> Module<T> {
 			end_item_price = Some(T::Price::max_value());
 		}
 
-		let tp = Self::trade_pair_by_hash(tp_hash).ok_or("can not get trade pair")?;
+		let tp = Self::trade_pair(tp_hash).ok_or("can not get trade pair")?;
 		let give: T::Hash;
 		let have: T::Hash;
 
@@ -506,6 +513,9 @@ impl<T: Trait> Module<T> {
 				<Orders<T>>::insert(order.hash.clone(), order.clone());
 				<Orders<T>>::insert(o.hash.clone(), o.clone());
 
+				// save the trade pair lastest matched price
+				Self::set_tp_latest_matched_price(tp_hash, Some(o.price))?;
+
 				// save the trade data
 				let trade = Trade::new(tp.base, tp.quote, &o, &order, base_qty, quote_qty);
 				<Trades<T>>::insert(trade.hash, trade.clone());
@@ -532,6 +542,9 @@ impl<T: Trait> Module<T> {
 
 		// todo: should remove every single item when finish one order match
 		<OrderLinkedItemList<T>>::remove_items(tp_hash, !otype);
+
+		// set trade pair buy/sell price after matched a price level
+		Self::set_tp_buy_one_or_sell_one_price(tp_hash, !order.otype)?;
 
 		if order.status == OrderStatus::Filled {
 			Ok(true)
@@ -588,6 +601,44 @@ impl<T: Trait> Module<T> {
 			OrderType::Sell => order_price <= linked_item_price,
 			OrderType::Buy => order_price >= linked_item_price,
 		}
+	}
+
+	pub fn set_tp_buy_one_or_sell_one_price(tp_hash: T::Hash, otype: OrderType) -> Result {
+
+		let mut tp = <TradePairs<T>>::get(tp_hash).ok_or("can not get trade pair")?;
+
+		let head = <OrderLinkedItemList<T>>::read_head(tp_hash);
+
+		if otype == OrderType::Buy {
+			if head.prev == Some(T::Price::min_value()) {
+				tp.buy_one_price = None;
+			} else {
+				tp.buy_one_price = head.prev;
+			}
+		}
+
+		if otype == OrderType::Sell {
+			if head.next == Some(T::Price::max_value()) {
+				tp.sell_one_price = None;
+			} else {
+				tp.sell_one_price = head.next;
+			}
+		}
+
+		<TradePairs<T>>::insert(tp_hash, tp);
+
+		Ok(())
+	}
+
+	pub fn set_tp_latest_matched_price(tp_hash: T::Hash, price: Option<T::Price>) -> Result {
+
+		let mut tp = <TradePairs<T>>::get(tp_hash).ok_or("can not get trade pair")?;
+		
+		tp.latest_matched_price = price;
+
+		<TradePairs<T>>::insert(tp_hash, tp);
+
+		Ok(())
 	}
 }
 
@@ -710,6 +761,10 @@ mod tests {
 			}
 		}
 
+		println!("[Trade Pair Data]");
+		let tp = TradeModule::trade_pair(tp_hash).unwrap();
+		println!("buy one: {:?}, sell one: {:?}, latest matched price: {:?}", tp.buy_one_price, tp.sell_one_price, tp.latest_matched_price);
+
 		println!();
 	}
 
@@ -738,7 +793,7 @@ mod tests {
 			let quote = token2.hash;
 			assert_ok!(TradeModule::create_trade_pair(Origin::signed(ALICE), base, quote));
 			let tp_hash = TradeModule::trade_pair_hash_by_base_quote((base, quote)).unwrap();
-			let tp = TradeModule::trade_pair_by_hash(tp_hash).unwrap();
+			let tp = TradeModule::trade_pair(tp_hash).unwrap();
 
 			let bottom = OrderLinkedItem::<Test> {
 				prev: max,
@@ -1216,7 +1271,7 @@ mod tests {
 			let quote = token2.hash;
 			assert_ok!(TradeModule::create_trade_pair(Origin::signed(ALICE), base, quote));
 			let tp_hash = TradeModule::trade_pair_hash_by_base_quote((base, quote)).unwrap();
-			let tp = TradeModule::trade_pair_by_hash(tp_hash).unwrap();
+			let tp = TradeModule::trade_pair(tp_hash).unwrap();
 
 			let bottom = OrderLinkedItem::<Test> {
 				prev: max,
@@ -1578,6 +1633,11 @@ mod tests {
 			assert_eq!(TokenModule::balance_of((ALICE, quote)), 500);
 			assert_eq!(TokenModule::balance_of((BOB, base)), 55);
 
+			let tp = TradeModule::trade_pair(tp_hash).unwrap();
+			assert_eq!(tp.buy_one_price, Some(6000000));
+			assert_eq!(tp.sell_one_price, Some(11000000));
+			assert_eq!(tp.latest_matched_price, Some(11000000));
+
 			// [Market Orders]
 			// Bottom ==> Price(Some(0)), Next(Some(6000000)), Prev(Some(18446744073709551615)), Orders(0): 
 			// Price(Some(6000000)), Next(None), Prev(Some(0)), Orders(1): (0x39ea…f183@[Created]: Sell[24, 24], Buy[400, 400]), 
@@ -1791,6 +1851,11 @@ mod tests {
 			assert_eq!(TokenModule::balance_of((ALICE, quote)), 10 + 100 + 10000 + 200);
 			assert_eq!(TokenModule::balance_of((BOB, base)), 1 + 11 + 1100 + 36);
 
+			let tp = TradeModule::trade_pair(tp_hash).unwrap();
+			assert_eq!(tp.buy_one_price, Some(18000000));
+			assert_eq!(tp.sell_one_price, None);
+			assert_eq!(tp.latest_matched_price, Some(18000000));
+
 			// [Market Orders]
 			// Bottom ==> Price(Some(0)), Next(Some(6000000)), Prev(Some(18446744073709551615)), Orders(0): 
 			// Price(Some(6000000)), Next(Some(18000000)), Prev(Some(0)), Orders(1): (0x39ea…f183@[Created]: Sell[24, 24], Buy[400, 400]), 
@@ -1831,7 +1896,7 @@ mod tests {
 			let quote = token2.hash;
 			assert_ok!(TradeModule::create_trade_pair(Origin::signed(ALICE), base, quote));
 			let tp_hash = TradeModule::trade_pair_hash_by_base_quote((base, quote)).unwrap();
-			let tp = TradeModule::trade_pair_by_hash(tp_hash).unwrap();
+			let tp = TradeModule::trade_pair(tp_hash).unwrap();
 
 			assert_ok!(TradeModule::create_limit_order(Origin::signed(ALICE), base, quote, OrderType::Buy, 25_010_000, 2501));
 			let order101_hash = TradeModule::owned_order((ALICE, 0)).unwrap();
