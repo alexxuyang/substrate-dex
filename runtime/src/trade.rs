@@ -262,11 +262,21 @@ decl_module! {
 		fn deposit_event<T>() = default;
 
 		pub fn create_trade_pair(origin, base: T::Hash, quote: T::Hash) -> Result {
-			Self::do_create_trade_pair(origin, base, quote)
+			let sender = ensure_signed(origin)?;
+
+			Self::do_create_trade_pair(sender, base, quote)
 		}
 
 		pub fn create_limit_order(origin, base: T::Hash, quote: T::Hash, otype: OrderType, price: T::Price, sell_amount: T::Balance) -> Result {
-			Self::do_create_limit_order(origin, base, quote, otype, price, sell_amount)
+			let sender = ensure_signed(origin)?;
+
+			Self::do_create_limit_order(sender, base, quote, otype, price, sell_amount)
+		}
+
+		pub fn cancel_limit_order(origin, order_hash: T::Hash) -> Result {
+			let sender = ensure_signed(origin)?;
+
+			Self::do_cancel_limit_order(sender, order_hash)
 		}
 	}
 }
@@ -323,8 +333,7 @@ impl<T: Trait> Module<T> {
 		}
 	}
 
-	fn do_create_trade_pair(origin: T::Origin, base: T::Hash, quote: T::Hash) -> Result {
-		let sender = ensure_signed(origin)?;
+	fn do_create_trade_pair(sender: T::AccountId, base: T::Hash, quote: T::Hash) -> Result {
 		
 		ensure!(base != quote, "base and quote can not be the same token");
 
@@ -364,10 +373,8 @@ impl<T: Trait> Module<T> {
 		Ok(())
 	}
 
-	fn do_create_limit_order(origin: T::Origin, base: T::Hash, quote: T::Hash, otype: OrderType, price: T::Price, 
+	fn do_create_limit_order(sender: T::AccountId, base: T::Hash, quote: T::Hash, otype: OrderType, price: T::Price, 
 		sell_amount: T::Balance) -> Result {
-
-		let sender = ensure_signed(origin)?;
 		
 		Self::ensure_bounds(price, sell_amount)?;
 		let buy_amount = Self::ensure_counterparty_amount_bounds(otype, price, sell_amount)?;
@@ -642,6 +649,10 @@ impl<T: Trait> Module<T> {
 
 		<TradePairs<T>>::insert(tp_hash, tp);
 
+		Ok(())
+	}
+
+	fn do_cancel_limit_order(sender: T::AccountId, base: T::Hash) -> Result {
 		Ok(())
 	}
 }
