@@ -34,7 +34,12 @@ pub struct LinkedList<T, S, K1, K2>(rstd::marker::PhantomData<(T, S, K1, K2)>);
 impl<T, S, K1, K2> LinkedList<T, S, K1, K2>
 where
 	T: trade::Trait,
-	K1: Encode + Decode + Clone + rstd::borrow::Borrow<<T as system::Trait>::Hash> + Copy,
+	K1: Encode
+		+ Decode
+		+ Clone
+		+ rstd::borrow::Borrow<<T as system::Trait>::Hash>
+		+ Copy
+		+ PartialEq,
 	K2: Parameter + Default + Member + Bounded + SimpleArithmetic + Copy,
 	S: StorageMap<(K1, Option<K2>), LinkedItem<K1, K2>, Query = Option<LinkedItem<K1, K2>>>,
 {
@@ -162,7 +167,7 @@ where
 		}
 	}
 
-	pub fn remove_items(key1: K1, otype: OrderType) {
+	pub fn remove_all(key1: K1, otype: OrderType) {
 		let end_item;
 
 		if otype == OrderType::Buy {
@@ -179,7 +184,7 @@ where
 				break;
 			}
 
-			match Self::remove_item(key1, key2.unwrap()) {
+			match Self::remove_orders_in_one_item(key1, key2.unwrap()) {
 				Err(_) => break,
 				_ => {}
 			};
@@ -188,8 +193,45 @@ where
 		}
 	}
 
+	pub fn remove_order(key1: K1, key2: K2, order_hash: K1) -> Result {
+		match S::get((key1, Some(key2))) {
+			Some(mut item) => {
+				ensure!(
+					item.orders.contains(&order_hash),
+					"cancel the order but not in market order list"
+				);
+
+				item.orders.retain(|&x| x != order_hash);
+				Self::write(key1, Some(key2), item.clone());
+
+				if item.orders.len() == 0 {
+					Self::remove_item(key1, key2);
+				}
+			}
+			None => {}
+		}
+
+		Ok(())
+	}
+
+	pub fn remove_item(key1: K1, key2: K2) {
+		if let Some(item) = S::take((key1, Some(key2))) {
+			S::mutate((key1.clone(), item.prev), |x| {
+				if let Some(x) = x {
+					x.next = item.next;
+				}
+			});
+
+			S::mutate((key1.clone(), item.next), |x| {
+				if let Some(x) = x {
+					x.prev = item.prev;
+				}
+			});
+		}
+	}
+
 	// when the order is canceled, it should be remove from Sell / Buy orders
-	pub fn remove_item(key1: K1, key2: K2) -> Result {
+	pub fn remove_orders_in_one_item(key1: K1, key2: K2) -> Result {
 		match S::get((key1, Some(key2))) {
 			Some(mut item) => {
 				while item.orders.len() > 0 {
@@ -205,19 +247,7 @@ where
 				}
 
 				if item.orders.len() == 0 {
-					if let Some(item) = S::take((key1, Some(key2))) {
-						S::mutate((key1.clone(), item.prev), |x| {
-							if let Some(x) = x {
-								x.next = item.next;
-							}
-						});
-
-						S::mutate((key1.clone(), item.next), |x| {
-							if let Some(x) = x {
-								x.prev = item.prev;
-							}
-						});
-					}
+					Self::remove_item(key1, key2);
 				}
 			}
 			None => {}
