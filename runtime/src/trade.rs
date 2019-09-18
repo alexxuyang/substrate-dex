@@ -784,7 +784,7 @@ mod tests {
 	}
 
 	#[test]
-	fn linked_list2_test_case() {
+	fn linked_list_test_case() {
 		with_externalities(&mut new_test_ext(), || {
 			let ALICE = 10;
 			let BOB = 20;
@@ -1046,7 +1046,7 @@ mod tests {
 			output_order(tp_hash);
 
 			// price = 5
-			order3.remained_sell_amount = Zero::zero();
+			order3.remained_buy_amount = Zero::zero();
 			order3.status = OrderStatus::Filled;
 			<Orders<Test>>::insert(order3.hash, order3);
 
@@ -1054,7 +1054,7 @@ mod tests {
 			<Orders<Test>>::insert(order4.hash, order4);
 
 			// price = 10
-			order2.remained_sell_amount = Zero::zero();
+			order2.remained_buy_amount = Zero::zero();
 			order2.status = OrderStatus::Filled;
 			<Orders<Test>>::insert(order2.hash, order2);
 
@@ -1062,7 +1062,7 @@ mod tests {
 			order5.status = OrderStatus::Canceled;
 			<Orders<Test>>::insert(order5.hash, order5);
 
-			order6.remained_sell_amount = order6.remained_sell_amount.checked_sub(1).unwrap();
+			order6.remained_buy_amount = order6.remained_buy_amount.checked_sub(1).unwrap();
 			order6.status = OrderStatus::PartialFilled;
 			<Orders<Test>>::insert(order6.hash, order6.clone());
 
@@ -1125,11 +1125,11 @@ mod tests {
 			<Orders<Test>>::insert(order1.hash, order1);
 
 			// price = 12
-			order6.remained_sell_amount = Zero::zero();
+			order6.remained_buy_amount = Zero::zero();
 			order6.status = OrderStatus::Filled;
 			<Orders<Test>>::insert(order6.hash, order6);
 
-			order7.remained_sell_amount = Zero::zero();
+			order7.remained_buy_amount = Zero::zero();
 			order7.status = OrderStatus::Filled;
 			<Orders<Test>>::insert(order7.hash, order7);
 
@@ -1156,7 +1156,7 @@ mod tests {
 
 			// remove buy orders
 			// price = 4
-			order103.remained_sell_amount = Zero::zero();
+			order103.remained_buy_amount = Zero::zero();
 			order103.status = OrderStatus::Filled;
 			<Orders<Test>>::insert(order103.hash, order103);
 
@@ -1164,7 +1164,7 @@ mod tests {
 			order101.status = OrderStatus::Canceled;
 			<Orders<Test>>::insert(order101.hash, order101);
 
-			order104.remained_sell_amount = order104.remained_sell_amount.checked_sub(100).unwrap();
+			order104.remained_buy_amount = order104.remained_buy_amount.checked_sub(100).unwrap();
 			order104.status = OrderStatus::PartialFilled;
 			<Orders<Test>>::insert(order104.hash, order104.clone());
 
@@ -1221,7 +1221,7 @@ mod tests {
 			<Orders<Test>>::insert(order104.hash, order104);
 
 			// price = 1
-			order102.remained_sell_amount = Zero::zero();
+			order102.remained_buy_amount = Zero::zero();
 			order102.status = OrderStatus::Filled;
 			<Orders<Test>>::insert(order102.hash, order102);
 
