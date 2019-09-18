@@ -1,18 +1,17 @@
-use support::{StorageMap, dispatch::Result, Parameter, ensure};
-use runtime_primitives::traits::{SimpleArithmetic, Bounded, Member, As};
-use parity_codec::{Compact, CompactAs, Encode, Decode};
+use parity_codec::{Decode, Encode};
 use rstd::prelude::*;
+use runtime_primitives::traits::{Bounded, Member, SimpleArithmetic};
+use support::{dispatch::Result, ensure, Parameter, StorageMap};
 
 use crate::trade::{self, *};
 
 #[derive(Encode, Decode, Clone)]
-#[cfg_attr(feature="std", derive(PartialEq, Eq, Debug))]
-pub struct LinkedItem<K1, K2>
-{
-    pub prev: Option<K2>,
-    pub next: Option<K2>,
-    pub price: Option<K2>,
-    pub orders: Vec<K1>, // remove the item at 0 index will caused performance issue, should be optimized
+#[cfg_attr(feature = "std", derive(PartialEq, Eq, Debug))]
+pub struct LinkedItem<K1, K2> {
+	pub prev: Option<K2>,
+	pub next: Option<K2>,
+	pub price: Option<K2>,
+	pub orders: Vec<K1>, // remove the item at 0 index will caused performance issue, should be optimized
 }
 
 pub struct LinkedList<T, S, K1, K2>(rstd::marker::PhantomData<(T, S, K1, K2)>);
@@ -25,34 +24,34 @@ pub struct LinkedList<T, S, K1, K2>(rstd::marker::PhantomData<(T, S, K1, K2)>);
 ///                                 Orders									Orders
 ///                                 o1: Hash -> buy 1@5						o101: Hash -> sell 100@10
 ///                                 o2: Hash -> buy 5@5						o102: Hash -> sell 100@5000
-///                                 o3: Hash -> buy 100@5					
+///                                 o3: Hash -> buy 100@5
 ///                                 o4: Hash -> buy 40@5
 ///                                 o5: Hash -> buy 1000@5
 ///                                     
 /// when do order matching, o1 will match before o2 and so on
 
 // Self: StorageMap, Key1: TradePairHash, Key2: Price, Value: OrderHash
-impl<T, S, K1, K2> LinkedList<T, S, K1, K2> where
+impl<T, S, K1, K2> LinkedList<T, S, K1, K2>
+where
 	T: trade::Trait,
 	K1: Encode + Decode + Clone + rstd::borrow::Borrow<<T as system::Trait>::Hash> + Copy,
 	K2: Parameter + Default + Member + Bounded + SimpleArithmetic + Copy,
 	S: StorageMap<(K1, Option<K2>), LinkedItem<K1, K2>, Query = Option<LinkedItem<K1, K2>>>,
 {
-    pub fn read_head(key: K1) -> LinkedItem<K1, K2> {
-        Self::read(key, None)
-    }
+	pub fn read_head(key: K1) -> LinkedItem<K1, K2> {
+		Self::read(key, None)
+	}
 
-    pub fn read_bottom(key: K1) -> LinkedItem<K1, K2> {
-        Self::read(key, Some(K2::min_value()))
-    }
+	pub fn read_bottom(key: K1) -> LinkedItem<K1, K2> {
+		Self::read(key, Some(K2::min_value()))
+	}
 
-    pub fn read_top(key: K1) -> LinkedItem<K1, K2> {
-        Self::read(key, Some(K2::max_value()))
-    }
+	pub fn read_top(key: K1) -> LinkedItem<K1, K2> {
+		Self::read(key, Some(K2::max_value()))
+	}
 
-    pub fn read(key1: K1, key2: Option<K2>) -> LinkedItem<K1, K2> {
-
-        S::get((key1, key2)).unwrap_or_else(|| {
+	pub fn read(key1: K1, key2: Option<K2>) -> LinkedItem<K1, K2> {
+		S::get((key1, key2)).unwrap_or_else(|| {
 			let bottom = LinkedItem {
 				prev: Some(K2::max_value()),
 				next: None,
@@ -79,22 +78,21 @@ impl<T, S, K1, K2> LinkedList<T, S, K1, K2> where
 			Self::write(key1, head.price, head.clone());
 			head
 		})
-    }
+	}
 
-    pub fn write(key1: K1, key2: Option<K2>, item: LinkedItem<K1, K2>) {
-        S::insert((key1, key2), item);
-    }
+	pub fn write(key1: K1, key2: Option<K2>, item: LinkedItem<K1, K2>) {
+		S::insert((key1, key2), item);
+	}
 
-    pub fn append(key1: K1, key2: K2, value: K1, otype: OrderType) {
-
-        let item = S::get((key1, Some(key2)));
-        match item {
-            Some(mut item) => {
-                item.orders.push(value);
+	pub fn append(key1: K1, key2: K2, value: K1, otype: OrderType) {
+		let item = S::get((key1, Some(key2)));
+		match item {
+			Some(mut item) => {
+				item.orders.push(value);
 				Self::write(key1, Some(key2), item);
-                return
-            },
-            None => {
+				return;
+			}
+			None => {
 				let start_item;
 				let end_item;
 
@@ -102,59 +100,59 @@ impl<T, S, K1, K2> LinkedList<T, S, K1, K2> where
 					OrderType::Buy => {
 						start_item = Some(K2::min_value());
 						end_item = None;
-					},
+					}
 					OrderType::Sell => {
 						start_item = None;
 						end_item = Some(K2::max_value());
 					}
 				}
 
-                let mut item = Self::read(key1, start_item);
+				let mut item = Self::read(key1, start_item);
 
-                while item.next != end_item {
+				while item.next != end_item {
 					match item.next {
-						None => {},
+						None => {}
 						Some(price) => {
 							if key2 < price {
 								break;
 							}
-						},
+						}
 					}
 
 					item = Self::read(key1, item.next);
-                }
+				}
 
-                // add key2 after item
-                // item(new_prev) -> key2 -> item.next(new_next)
+				// add key2 after item
+				// item(new_prev) -> key2 -> item.next(new_next)
 
-                // update new_prev
-                let new_prev = LinkedItem {
-                    next: Some(key2), 
-                    ..item
-                };
-                Self::write(key1, new_prev.price, new_prev.clone());
+				// update new_prev
+				let new_prev = LinkedItem {
+					next: Some(key2),
+					..item
+				};
+				Self::write(key1, new_prev.price, new_prev.clone());
 
-                // update new_next
-                let next = Self::read(key1, item.next);
-                let new_next = LinkedItem {
-                    prev: Some(key2),
-                    ..next
-                };
-                Self::write(key1, new_next.price, new_next.clone());
+				// update new_next
+				let next = Self::read(key1, item.next);
+				let new_next = LinkedItem {
+					prev: Some(key2),
+					..next
+				};
+				Self::write(key1, new_next.price, new_next.clone());
 
-                // update key2
-                let mut v = Vec::new();
-                v.push(value);
-                let item = LinkedItem {
-                    prev: new_prev.price,
-                    next: new_next.price,
-                    orders: v,
-                    price: Some(key2),
-                };
-                Self::write(key1, Some(key2), item);
-            }
-        };
-    }
+				// update key2
+				let mut v = Vec::new();
+				v.push(value);
+				let item = LinkedItem {
+					prev: new_prev.price,
+					next: new_next.price,
+					orders: v,
+					price: Some(key2),
+				};
+				Self::write(key1, Some(key2), item);
+			}
+		};
+	}
 
 	pub fn next_match_price(item: &LinkedItem<K1, K2>, otype: OrderType) -> Option<K2> {
 		if otype == OrderType::Buy {
@@ -183,23 +181,22 @@ impl<T, S, K1, K2> LinkedList<T, S, K1, K2> where
 
 			match Self::remove_item(key1, key2.unwrap()) {
 				Err(_) => break,
-				_ => {},
+				_ => {}
 			};
 
 			head = Self::read_head(key1);
 		}
 	}
 
-    // when the order is canceled, it should be remove from Sell / Buy orders
-    pub fn remove_item(key1: K1, key2: K2) -> Result {
-
+	// when the order is canceled, it should be remove from Sell / Buy orders
+	pub fn remove_item(key1: K1, key2: K2) -> Result {
 		match S::get((key1, Some(key2))) {
 			Some(mut item) => {
 				while item.orders.len() > 0 {
 					let order_hash = item.orders.get(0).ok_or("can not get order hash")?;
-                    
-					let order = <trade::Module<T>>::order(order_hash.borrow()).ok_or("can not get order")?;
-					
+
+					let order = <trade::Module<T>>::order(order_hash.borrow())
+						.ok_or("can not get order")?;
 					ensure!(order.is_finished(), "try to remove not finished order");
 
 					item.orders.remove(0);
@@ -222,10 +219,10 @@ impl<T, S, K1, K2> LinkedList<T, S, K1, K2> where
 						});
 					}
 				}
-			},
+			}
 			None => {}
 		}
 
 		Ok(())
-    }
+	}
 }

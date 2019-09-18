@@ -786,29 +786,27 @@ mod tests {
 	#[test]
 	fn linked_list_test_case() {
 		with_externalities(&mut new_test_ext(), || {
-			let ALICE = 10;
-			let BOB = 20;
-			let CHARLIE = 30;
+			let alice = 10;
+			let bob = 20;
 
 			let max = Some(<Test as Trait>::Price::max_value());
 			let min = Some(<Test as Trait>::Price::min_value());
 
 			// token1
-			assert_ok!(TokenModule::issue(Origin::signed(ALICE), b"66".to_vec(), 21000000));
-			let token1_hash = TokenModule::owned_token((ALICE, 0)).unwrap();
+			assert_ok!(TokenModule::issue(Origin::signed(alice), b"66".to_vec(), 21000000));
+			let token1_hash = TokenModule::owned_token((alice, 0)).unwrap();
 			let token1 = TokenModule::token(token1_hash).unwrap();
 
 			// token2
-			assert_ok!(TokenModule::issue(Origin::signed(BOB), b"77".to_vec(), 10000000));
-			let token2_hash = TokenModule::owned_token((BOB, 0)).unwrap();
+			assert_ok!(TokenModule::issue(Origin::signed(bob), b"77".to_vec(), 10000000));
+			let token2_hash = TokenModule::owned_token((bob, 0)).unwrap();
 			let token2 = TokenModule::token(token2_hash).unwrap();
 
 			// tradepair
 			let base = token1.hash;
 			let quote = token2.hash;
-			assert_ok!(TradeModule::create_trade_pair(Origin::signed(ALICE), base, quote));
+			assert_ok!(TradeModule::create_trade_pair(Origin::signed(alice), base, quote));
 			let tp_hash = TradeModule::trade_pair_hash_by_base_quote((base, quote)).unwrap();
-			let tp = TradeModule::trade_pair(tp_hash).unwrap();
 
 			let bottom = OrderLinkedItem::<Test> {
 				prev: max,
@@ -842,59 +840,59 @@ mod tests {
 			output_order(tp_hash);
 
 			// sell limit order
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 180_000_000, 100));
-			let order1_hash = TradeModule::owned_order((BOB, 0)).unwrap();
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(bob), base, quote, OrderType::Sell, 180_000_000, 100));
+			let order1_hash = TradeModule::owned_order((bob, 0)).unwrap();
 			let mut order1 = TradeModule::order(order1_hash).unwrap();
 			assert_eq!(order1.sell_amount, 100);
 
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 100_000_000, 50));
-			let order2_hash = TradeModule::owned_order((BOB, 1)).unwrap();
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(bob), base, quote, OrderType::Sell, 100_000_000, 50));
+			let order2_hash = TradeModule::owned_order((bob, 1)).unwrap();
 			let mut order2 = TradeModule::order(order2_hash).unwrap();
 			assert_eq!(order2.sell_amount, 50);
 
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 50_000_000, 10));
-			let order3_hash = TradeModule::owned_order((BOB, 2)).unwrap();
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(bob), base, quote, OrderType::Sell, 50_000_000, 10));
+			let order3_hash = TradeModule::owned_order((bob, 2)).unwrap();
 			let mut order3 = TradeModule::order(order3_hash).unwrap();
 			assert_eq!(order3.sell_amount, 10);
 
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 50_000_000, 20));
-			let order4_hash = TradeModule::owned_order((BOB, 3)).unwrap();
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(bob), base, quote, OrderType::Sell, 50_000_000, 20));
+			let order4_hash = TradeModule::owned_order((bob, 3)).unwrap();
 			let mut order4 = TradeModule::order(order4_hash).unwrap();
 			assert_eq!(order4.sell_amount, 20);
 			
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 120_000_000, 10));
-			let order5_hash = TradeModule::owned_order((BOB, 4)).unwrap();
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(bob), base, quote, OrderType::Sell, 120_000_000, 10));
+			let order5_hash = TradeModule::owned_order((bob, 4)).unwrap();
 			let mut order5 = TradeModule::order(order5_hash).unwrap();
 			assert_eq!(order5.sell_amount, 10);
 
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 120_000_000, 30));
-			let order6_hash = TradeModule::owned_order((BOB, 5)).unwrap();
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(bob), base, quote, OrderType::Sell, 120_000_000, 30));
+			let order6_hash = TradeModule::owned_order((bob, 5)).unwrap();
 			let mut order6 = TradeModule::order(order6_hash).unwrap();
 			assert_eq!(order6.sell_amount, 30);
 			
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 120_000_000, 20));
-			let order7_hash = TradeModule::owned_order((BOB, 6)).unwrap();
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(bob), base, quote, OrderType::Sell, 120_000_000, 20));
+			let order7_hash = TradeModule::owned_order((bob, 6)).unwrap();
 			let mut order7 = TradeModule::order(order7_hash).unwrap();
 			assert_eq!(order7.sell_amount, 20);
 
 			// buy limit order
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(ALICE), base, quote, OrderType::Buy, 20_000_000, 5));
-			let order101_hash = TradeModule::owned_order((ALICE, 0)).unwrap();
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(alice), base, quote, OrderType::Buy, 20_000_000, 5));
+			let order101_hash = TradeModule::owned_order((alice, 0)).unwrap();
 			let mut order101 = TradeModule::order(order101_hash).unwrap();
 			assert_eq!(order101.sell_amount, 5);
 
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(ALICE), base, quote, OrderType::Buy, 10_000_000, 12));
-			let order102_hash = TradeModule::owned_order((ALICE, 1)).unwrap();
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(alice), base, quote, OrderType::Buy, 10_000_000, 12));
+			let order102_hash = TradeModule::owned_order((alice, 1)).unwrap();
 			let mut order102 = TradeModule::order(order102_hash).unwrap();
 			assert_eq!(order102.sell_amount, 12);
 
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(ALICE), base, quote, OrderType::Buy, 40_000_000, 100));
-			let order103_hash = TradeModule::owned_order((ALICE, 2)).unwrap();
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(alice), base, quote, OrderType::Buy, 40_000_000, 100));
+			let order103_hash = TradeModule::owned_order((alice, 2)).unwrap();
 			let mut order103 = TradeModule::order(order103_hash).unwrap();
 			assert_eq!(order103.sell_amount, 100);
 
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(ALICE), base, quote, OrderType::Buy, 20_000_000, 1000000));
-			let order104_hash = TradeModule::owned_order((ALICE, 3)).unwrap();
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(alice), base, quote, OrderType::Buy, 20_000_000, 1000000));
+			let order104_hash = TradeModule::owned_order((alice, 3)).unwrap();
 			let mut order104 = TradeModule::order(order104_hash).unwrap();
 			assert_eq!(order104.sell_amount, 1000000);
 
@@ -1264,29 +1262,27 @@ mod tests {
 	#[test]
 	fn order_match_linked_list_test_case() {
 		with_externalities(&mut new_test_ext(), || {
-			let ALICE = 10;
-			let BOB = 20;
-			let CHARLIE = 30;
+			let alice = 10;
+			let bob = 20;
 
 			let max = Some(<Test as Trait>::Price::max_value());
 			let min = Some(<Test as Trait>::Price::min_value());
 
 			// token1
-			assert_ok!(TokenModule::issue(Origin::signed(ALICE), b"66".to_vec(), 21000000));
-			let token1_hash = TokenModule::owned_token((ALICE, 0)).unwrap();
+			assert_ok!(TokenModule::issue(Origin::signed(alice), b"66".to_vec(), 21000000));
+			let token1_hash = TokenModule::owned_token((alice, 0)).unwrap();
 			let token1 = TokenModule::token(token1_hash).unwrap();
 
 			// token2
-			assert_ok!(TokenModule::issue(Origin::signed(BOB), b"77".to_vec(), 10000000));
-			let token2_hash = TokenModule::owned_token((BOB, 0)).unwrap();
+			assert_ok!(TokenModule::issue(Origin::signed(bob), b"77".to_vec(), 10000000));
+			let token2_hash = TokenModule::owned_token((bob, 0)).unwrap();
 			let token2 = TokenModule::token(token2_hash).unwrap();
 
 			// tradepair
 			let base = token1.hash;
 			let quote = token2.hash;
-			assert_ok!(TradeModule::create_trade_pair(Origin::signed(ALICE), base, quote));
+			assert_ok!(TradeModule::create_trade_pair(Origin::signed(alice), base, quote));
 			let tp_hash = TradeModule::trade_pair_hash_by_base_quote((base, quote)).unwrap();
-			let tp = TradeModule::trade_pair(tp_hash).unwrap();
 
 			let bottom = OrderLinkedItem::<Test> {
 				prev: max,
@@ -1320,41 +1316,41 @@ mod tests {
 			// [Market Trades]
 			output_order(tp_hash);
 
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 18_000_000, 200));
-			let order1_hash = TradeModule::owned_order((BOB, 0)).unwrap();
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(bob), base, quote, OrderType::Sell, 18_000_000, 200));
+			let order1_hash = TradeModule::owned_order((bob, 0)).unwrap();
 			let mut order1 = TradeModule::order(order1_hash).unwrap();
 			assert_eq!(order1.sell_amount, 200);
 			assert_eq!(order1.remained_sell_amount, 200);
 			assert_eq!(order1.buy_amount, 36);
 			assert_eq!(order1.remained_buy_amount, 36);
 
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 10_000_000, 10));
-			let order2_hash = TradeModule::owned_order((BOB, 1)).unwrap();
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(bob), base, quote, OrderType::Sell, 10_000_000, 10));
+			let order2_hash = TradeModule::owned_order((bob, 1)).unwrap();
 			let mut order2 = TradeModule::order(order2_hash).unwrap();
 			assert_eq!(order2.sell_amount, 10);
 			assert_eq!(order2.remained_sell_amount, 10);
 			assert_eq!(order2.buy_amount, 1);
 			assert_eq!(order2.remained_buy_amount, 1);
 
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 11_000_000, 100));
-			let order3_hash = TradeModule::owned_order((BOB, 2)).unwrap();
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(bob), base, quote, OrderType::Sell, 11_000_000, 100));
+			let order3_hash = TradeModule::owned_order((bob, 2)).unwrap();
 			let mut order3 = TradeModule::order(order3_hash).unwrap();
 			assert_eq!(order3.sell_amount, 100);
 			assert_eq!(order3.remained_sell_amount, 100);
 			assert_eq!(order3.buy_amount, 11);
 			assert_eq!(order3.remained_buy_amount, 11);
 
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 11_000_000, 10000));
-			let order4_hash = TradeModule::owned_order((BOB, 3)).unwrap();
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(bob), base, quote, OrderType::Sell, 11_000_000, 10000));
+			let order4_hash = TradeModule::owned_order((bob, 3)).unwrap();
 			let mut order4 = TradeModule::order(order4_hash).unwrap();
 			assert_eq!(order4.sell_amount, 10000);
 			assert_eq!(order4.remained_sell_amount, 10000);
 			assert_eq!(order4.buy_amount, 1100);
 			assert_eq!(order4.remained_buy_amount, 1100);
 
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(ALICE), base, quote, OrderType::Buy, 6_000_000, 24));
-			let order101_hash = TradeModule::owned_order((ALICE, 0)).unwrap();
-			let mut order101 = TradeModule::order(order101_hash).unwrap();
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(alice), base, quote, OrderType::Buy, 6_000_000, 24));
+			let order101_hash = TradeModule::owned_order((alice, 0)).unwrap();
+			let order101 = TradeModule::order(order101_hash).unwrap();
 			assert_eq!(order101.sell_amount, 24);
 			assert_eq!(order101.remained_sell_amount, 24);
 			assert_eq!(order101.buy_amount, 400);
@@ -1460,10 +1456,10 @@ mod tests {
 			// [Market Trades]
 			output_order(tp_hash);
 	
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(ALICE), base, quote, OrderType::Buy, 11_000_000, 55));
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(alice), base, quote, OrderType::Buy, 11_000_000, 55));
 
-			let order102_hash = TradeModule::owned_order((ALICE, 1)).unwrap();
-			let mut order102 = TradeModule::order(order102_hash).unwrap();
+			let order102_hash = TradeModule::owned_order((alice, 1)).unwrap();
+			let order102 = TradeModule::order(order102_hash).unwrap();
 			assert_eq!(order102.sell_amount, 55);
 			assert_eq!(order102.remained_sell_amount, 0);
 			assert_eq!(order102.buy_amount, 500);
@@ -1570,11 +1566,11 @@ mod tests {
 			v.push(trades[1]);
 			v.push(trades[2]);
 
-			assert_eq!(<OwnedTrades<Test>>::get(ALICE), Some(v.clone()));
-			assert_eq!(<OwnedTrades<Test>>::get(BOB), Some(v.clone()));
+			assert_eq!(<OwnedTrades<Test>>::get(alice), Some(v.clone()));
+			assert_eq!(<OwnedTrades<Test>>::get(bob), Some(v.clone()));
 
-			assert_eq!(<OwnedTPTrades<Test>>::get((ALICE, tp_hash)), Some(v.clone()));
-			assert_eq!(<OwnedTPTrades<Test>>::get((BOB, tp_hash)), Some(v.clone()));
+			assert_eq!(<OwnedTPTrades<Test>>::get((alice, tp_hash)), Some(v.clone()));
+			assert_eq!(<OwnedTPTrades<Test>>::get((bob, tp_hash)), Some(v.clone()));
 
 			assert_eq!(<TradePairOwnedTrades<Test>>::get(tp_hash), Some(v.clone()));
 
@@ -1601,10 +1597,10 @@ mod tests {
 			let trade1 = Trade::<Test> {
 				base: base,
 				quote: quote,
-				buyer: ALICE,
-				seller: BOB,
-				maker: BOB,
-				taker: ALICE,
+				buyer: alice,
+				seller: bob,
+				maker: bob,
+				taker: alice,
 				otype: OrderType::Buy,
 				price: 10_000_000,
 				base_amount: 1,
@@ -1617,10 +1613,10 @@ mod tests {
 			let trade2 = Trade::<Test> {
 				base: base,
 				quote: quote,
-				buyer: ALICE,
-				seller: BOB,
-				maker: BOB,
-				taker: ALICE,
+				buyer: alice,
+				seller: bob,
+				maker: bob,
+				taker: alice,
 				otype: OrderType::Buy,
 				price: 11000000,
 				base_amount: 11,
@@ -1633,10 +1629,10 @@ mod tests {
 			let trade3 = Trade::<Test> {
 				base: base,
 				quote: quote,
-				buyer: ALICE,
-				seller: BOB,
-				maker: BOB,
-				taker: ALICE,
+				buyer: alice,
+				seller: bob,
+				maker: bob,
+				taker: alice,
 				otype: OrderType::Buy,
 				price: 11000000,
 				base_amount: 43,
@@ -1645,8 +1641,8 @@ mod tests {
 			};
 			assert_eq!(t3, trade3);
 
-			assert_eq!(TokenModule::balance_of((ALICE, quote)), 500);
-			assert_eq!(TokenModule::balance_of((BOB, base)), 55);
+			assert_eq!(TokenModule::balance_of((alice, quote)), 500);
+			assert_eq!(TokenModule::balance_of((bob, base)), 55);
 
 			let tp = TradeModule::trade_pair(tp_hash).unwrap();
 			assert_eq!(tp.buy_one_price, Some(6000000));
@@ -1666,9 +1662,9 @@ mod tests {
 			// [0x72bb…80c0/0x8a33…f642] - 0x1f02…44c7@11000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][43, 390]
 			output_order(tp_hash);
 
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(ALICE), base, quote, OrderType::Buy, 18_000_000, 13212));
-			let order103_hash = TradeModule::owned_order((ALICE, 2)).unwrap();
-			let mut order103 = TradeModule::order(order103_hash).unwrap();
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(alice), base, quote, OrderType::Buy, 18_000_000, 13212));
+			let order103_hash = TradeModule::owned_order((alice, 2)).unwrap();
+			let order103 = TradeModule::order(order103_hash).unwrap();
 			assert_eq!(order103.sell_amount, 13212);
 			assert_eq!(order103.remained_sell_amount, 13212 - 1057 - 36);
 			assert_eq!(order103.buy_amount, 73400);
@@ -1756,11 +1752,11 @@ mod tests {
 			v.push(trades[3]);
 			v.push(trades[4]);
 
-			assert_eq!(<OwnedTrades<Test>>::get(ALICE), Some(v.clone()));
-			assert_eq!(<OwnedTrades<Test>>::get(BOB), Some(v.clone()));
+			assert_eq!(<OwnedTrades<Test>>::get(alice), Some(v.clone()));
+			assert_eq!(<OwnedTrades<Test>>::get(bob), Some(v.clone()));
 
-			assert_eq!(<OwnedTPTrades<Test>>::get((ALICE, tp_hash)), Some(v.clone()));
-			assert_eq!(<OwnedTPTrades<Test>>::get((BOB, tp_hash)), Some(v.clone()));
+			assert_eq!(<OwnedTPTrades<Test>>::get((alice, tp_hash)), Some(v.clone()));
+			assert_eq!(<OwnedTPTrades<Test>>::get((bob, tp_hash)), Some(v.clone()));
 
 			assert_eq!(<TradePairOwnedTrades<Test>>::get(tp_hash), Some(v.clone()));
 
@@ -1787,10 +1783,10 @@ mod tests {
 			let trade1 = Trade::<Test> {
 				base: base,
 				quote: quote,
-				buyer: ALICE,
-				seller: BOB,
-				maker: BOB,
-				taker: ALICE,
+				buyer: alice,
+				seller: bob,
+				maker: bob,
+				taker: alice,
 				otype: OrderType::Buy,
 				price: 10_000_000,
 				base_amount: 1,
@@ -1803,10 +1799,10 @@ mod tests {
 			let trade2 = Trade::<Test> {
 				base: base,
 				quote: quote,
-				buyer: ALICE,
-				seller: BOB,
-				maker: BOB,
-				taker: ALICE,
+				buyer: alice,
+				seller: bob,
+				maker: bob,
+				taker: alice,
 				otype: OrderType::Buy,
 				price: 11000000,
 				base_amount: 11,
@@ -1819,10 +1815,10 @@ mod tests {
 			let trade3 = Trade::<Test> {
 				base: base,
 				quote: quote,
-				buyer: ALICE,
-				seller: BOB,
-				maker: BOB,
-				taker: ALICE,
+				buyer: alice,
+				seller: bob,
+				maker: bob,
+				taker: alice,
 				otype: OrderType::Buy,
 				price: 11000000,
 				base_amount: 43,
@@ -1835,10 +1831,10 @@ mod tests {
 			let trade4 = Trade::<Test> {
 				base: base,
 				quote: quote,
-				buyer: ALICE,
-				seller: BOB,
-				maker: BOB,
-				taker: ALICE,
+				buyer: alice,
+				seller: bob,
+				maker: bob,
+				taker: alice,
 				otype: OrderType::Buy,
 				price: 11000000,
 				base_amount: 1057,
@@ -1851,10 +1847,10 @@ mod tests {
 			let trade5 = Trade::<Test> {
 				base: base,
 				quote: quote,
-				buyer: ALICE,
-				seller: BOB,
-				maker: BOB,
-				taker: ALICE,
+				buyer: alice,
+				seller: bob,
+				maker: bob,
+				taker: alice,
 				otype: OrderType::Buy,
 				price: 18000000,
 				base_amount: 36,
@@ -1863,8 +1859,8 @@ mod tests {
 			};
 			assert_eq!(t5, trade5);
 
-			assert_eq!(TokenModule::balance_of((ALICE, quote)), 10 + 100 + 10000 + 200);
-			assert_eq!(TokenModule::balance_of((BOB, base)), 1 + 11 + 1100 + 36);
+			assert_eq!(TokenModule::balance_of((alice, quote)), 10 + 100 + 10000 + 200);
+			assert_eq!(TokenModule::balance_of((bob, base)), 1 + 11 + 1100 + 36);
 
 			let tp = TradeModule::trade_pair(tp_hash).unwrap();
 			assert_eq!(tp.buy_one_price, Some(18000000));
@@ -1890,85 +1886,80 @@ mod tests {
 	#[test]
 	fn order_match_test_case() {
 		with_externalities(&mut new_test_ext(), || {
-			let ALICE = 10;
-			let BOB = 20;
-
-			let max = Some(<Test as Trait>::Price::max_value());
-			let min = Some(<Test as Trait>::Price::min_value());
+			let alice = 10;
+			let bob = 20;
 
 			// token1
-			assert_ok!(TokenModule::issue(Origin::signed(ALICE), b"66".to_vec(), 21000000));
-			let token1_hash = TokenModule::owned_token((ALICE, 0)).unwrap();
+			assert_ok!(TokenModule::issue(Origin::signed(alice), b"66".to_vec(), 21000000));
+			let token1_hash = TokenModule::owned_token((alice, 0)).unwrap();
 			let token1 = TokenModule::token(token1_hash).unwrap();
 
 			// token2
-			assert_ok!(TokenModule::issue(Origin::signed(BOB), b"77".to_vec(), 10000000));
-			let token2_hash = TokenModule::owned_token((BOB, 0)).unwrap();
+			assert_ok!(TokenModule::issue(Origin::signed(bob), b"77".to_vec(), 10000000));
+			let token2_hash = TokenModule::owned_token((bob, 0)).unwrap();
 			let token2 = TokenModule::token(token2_hash).unwrap();
 
 			// tradepair
 			let base = token1.hash;
 			let quote = token2.hash;
-			assert_ok!(TradeModule::create_trade_pair(Origin::signed(ALICE), base, quote));
-			let tp_hash = TradeModule::trade_pair_hash_by_base_quote((base, quote)).unwrap();
-			let tp = TradeModule::trade_pair(tp_hash).unwrap();
+			assert_ok!(TradeModule::create_trade_pair(Origin::signed(alice), base, quote));
 
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(ALICE), base, quote, OrderType::Buy, 25_010_000, 2501));
-			let order101_hash = TradeModule::owned_order((ALICE, 0)).unwrap();
-			let mut order101 = TradeModule::order(order101_hash).unwrap();
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(alice), base, quote, OrderType::Buy, 25_010_000, 2501));
+			let order101_hash = TradeModule::owned_order((alice, 0)).unwrap();
+			let order101 = TradeModule::order(order101_hash).unwrap();
 			assert_eq!(order101.sell_amount, 2501);
 			assert_eq!(order101.remained_sell_amount, 2501);
 			assert_eq!(order101.buy_amount, 10000);
 			assert_eq!(order101.remained_buy_amount, 10000);
 
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 25_000_000, 4));
-			let order1_hash = TradeModule::owned_order((BOB, 0)).unwrap();
-			let mut order1 = TradeModule::order(order1_hash).unwrap();
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(bob), base, quote, OrderType::Sell, 25_000_000, 4));
+			let order1_hash = TradeModule::owned_order((bob, 0)).unwrap();
+			let order1 = TradeModule::order(order1_hash).unwrap();
 			assert_eq!(order1.sell_amount, 4);
 			assert_eq!(order1.remained_sell_amount, 0);
 			assert_eq!(order1.buy_amount, 1);
 			assert_eq!(order1.remained_buy_amount, 0);
 
-			assert_eq!(TokenModule::balance_of((ALICE, quote)), 4);
-			assert_eq!(TokenModule::balance_of((ALICE, base)), 21000000 - 1);
-			assert_eq!(TokenModule::balance_of((BOB, base)), 1);
-			assert_eq!(TokenModule::balance_of((BOB, quote)), 10000000 - 4);
+			assert_eq!(TokenModule::balance_of((alice, quote)), 4);
+			assert_eq!(TokenModule::balance_of((alice, base)), 21000000 - 1);
+			assert_eq!(TokenModule::balance_of((bob, base)), 1);
+			assert_eq!(TokenModule::balance_of((bob, quote)), 10000000 - 4);
 
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(BOB), base, quote, OrderType::Sell, 25_000_000, 9996));
-			let order1_hash = TradeModule::owned_order((BOB, 1)).unwrap();
-			let mut order1 = TradeModule::order(order1_hash).unwrap();
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(bob), base, quote, OrderType::Sell, 25_000_000, 9996));
+			let order1_hash = TradeModule::owned_order((bob, 1)).unwrap();
+			let order1 = TradeModule::order(order1_hash).unwrap();
 			assert_eq!(order1.sell_amount, 9996);
 			assert_eq!(order1.remained_sell_amount, 0);
 			assert_eq!(order1.buy_amount, 2499);
 			assert_eq!(order1.remained_buy_amount, 0);
 
-			let order101_hash = TradeModule::owned_order((ALICE, 0)).unwrap();
-			let mut order101 = TradeModule::order(order101_hash).unwrap();
+			let order101_hash = TradeModule::owned_order((alice, 0)).unwrap();
+			let order101 = TradeModule::order(order101_hash).unwrap();
 			assert_eq!(order101.sell_amount, 2501);
 			assert_eq!(order101.remained_sell_amount, 1);
 			assert_eq!(order101.buy_amount, 10000);
 			assert_eq!(order101.remained_buy_amount, 3);
 
-			assert_eq!(TokenModule::balance_of((ALICE, quote)), 4 + 9993);
-			assert_eq!(TokenModule::balance_of((ALICE, base)), 21000000 - 1 - 2499);
-			assert_eq!(TokenModule::freezed_balance_of((ALICE, base)), 1);
-			assert_eq!(TokenModule::balance_of((BOB, base)), 1 + 2499);
-			assert_eq!(TokenModule::balance_of((BOB, quote)), 10000000 - 4 - 9993);
-			assert_eq!(TokenModule::freezed_balance_of((BOB, base)), 0);
+			assert_eq!(TokenModule::balance_of((alice, quote)), 4 + 9993);
+			assert_eq!(TokenModule::balance_of((alice, base)), 21000000 - 1 - 2499);
+			assert_eq!(TokenModule::freezed_balance_of((alice, base)), 1);
+			assert_eq!(TokenModule::balance_of((bob, base)), 1 + 2499);
+			assert_eq!(TokenModule::balance_of((bob, quote)), 10000000 - 4 - 9993);
+			assert_eq!(TokenModule::freezed_balance_of((bob, base)), 0);
 		});
 	}
 
 	#[test]
 	fn calculate_ex_amount() {
 		with_externalities(&mut new_test_ext(), || {
-			let ALICE = 10;
-			let BOB = 20;
+			let alice = 10;
+			let bob = 20;
 
-			let mut order1 = LimitOrder::<Test> {
+			let order1 = LimitOrder::<Test> {
 				hash: H256::from_low_u64_be(0),
 				base: H256::from_low_u64_be(0),
 				quote: H256::from_low_u64_be(0),
-				owner: ALICE,
+				owner: alice,
 				price: <Test as Trait>::Price::sa(25010000),
 				sell_amount: 2501,
 				remained_sell_amount: 2501,
@@ -1982,7 +1973,7 @@ mod tests {
 				hash: H256::from_low_u64_be(0),
 				base: H256::from_low_u64_be(0),
 				quote: H256::from_low_u64_be(0),
-				owner: BOB,
+				owner: bob,
 				price: <Test as Trait>::Price::sa(25000000),
 				sell_amount: 4,
 				remained_sell_amount: 4,
