@@ -1,6 +1,6 @@
-use parity_codec::{Decode, Encode};
+use codec::{Decode, Encode};
 use rstd::prelude::*;
-use runtime_primitives::traits::{Bounded, Member, SimpleArithmetic};
+use sr_primitives::traits::{Bounded, Member, SimpleArithmetic};
 use support::{dispatch::Result, ensure, Parameter, StorageMap};
 
 use crate::trade::{self, *};

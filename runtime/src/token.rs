@@ -1,9 +1,10 @@
-use parity_codec::{Decode, Encode};
+use codec::{Decode, Encode};
 use rstd::prelude::Vec;
-use runtime_primitives::traits::{As, Hash};
+use sr_primitives::traits::{Bounded, Hash};
 use support::{
     decl_event, decl_module, decl_storage, dispatch::Result, ensure, StorageMap, StorageValue,
 };
+
 use system::ensure_signed;
 
 #[derive(Encode, Decode, Default, Clone, PartialEq)]
@@ -33,7 +34,7 @@ decl_event!(
 );
 
 decl_storage! {
-    trait Store for Module<T: Trait> as token {
+    trait Store for Module<T: Trait> as TokenModule {
         Tokens get(token): map T::Hash => Option<Token<T::Hash, T::Balance>>;
         Owners get(owner): map T::Hash => Option<T::AccountId>;
         BalanceOf get(balance_of): map (T::AccountId, T::Hash) => T::Balance;
@@ -49,7 +50,7 @@ decl_storage! {
 
 decl_module! {
     pub struct Module<T: Trait> for enum Call where origin: T::Origin {
-        fn deposit_event<T>() = default;
+        fn deposit_event() = default;
 
         pub fn issue(origin, symbol: Vec<u8>, total_supply: T::Balance) -> Result {
             Self::do_issue(origin, symbol, total_supply)
@@ -76,29 +77,29 @@ decl_module! {
 }
 
 impl<T: Trait> Module<T> {
-    fn do_issue(origin: T::Origin, symbol: Vec<u8>, total_supply: T::Balance) -> Result {
+    pub fn do_issue(origin: T::Origin, symbol: Vec<u8>, total_supply: T::Balance) -> Result {
         let sender = ensure_signed(origin)?;
 
-        let nonce = <Nonce<T>>::get();
+        let nonce = Nonce::get();
 
         let hash = (<system::Module<T>>::random_seed(), sender.clone(), nonce)
             .using_encoded(<T as system::Trait>::Hashing::hash);
 
-        let token = Token {
+        let token = Token::<T::Hash, T::Balance> {
             hash: hash.clone(),
             total_supply,
             symbol: symbol.clone(),
         };
 
-        <Nonce<T>>::mutate(|n| *n += 1);
-        <Tokens<T>>::insert(hash.clone(), token);
-        <Owners<T>>::insert(hash.clone(), sender.clone());
-        <BalanceOf<T>>::insert((sender.clone(), hash.clone()), total_supply);
-        <FreeBalanceOf<T>>::insert((sender.clone(), hash.clone()), total_supply);
+        Nonce::mutate(|n| *n += 1);
+        Tokens::<T>::insert(hash.clone(), token);
+        Owners::<T>::insert(hash.clone(), sender.clone());
+        BalanceOf::<T>::insert((sender.clone(), hash.clone()), total_supply);
+        FreeBalanceOf::<T>::insert((sender.clone(), hash.clone()), total_supply);
 
-        let owned_token_index = <OwnedTokensIndex<T>>::get(sender.clone());
-        <OwnedTokens<T>>::insert((sender.clone(), owned_token_index), hash);
-        <OwnedTokensIndex<T>>::insert(sender.clone(), owned_token_index + 1);
+        let owned_token_index = OwnedTokensIndex::<T>::get(sender.clone());
+        OwnedTokens::<T>::insert((sender.clone(), owned_token_index), hash);
+        OwnedTokensIndex::<T>::insert(sender.clone(), owned_token_index + 1);
 
         Self::deposit_event(RawEvent::Issued(sender, hash.clone(), total_supply));
 
@@ -133,21 +134,21 @@ impl<T: Trait> Module<T> {
         let to_amount = Self::balance_of((to.clone(), hash.clone()));
         let new_to_amount = to_amount + amount;
         ensure!(
-            new_to_amount.as_() <= u64::max_value(),
+            new_to_amount <= T::Balance::max_value(),
             "to amount overflow"
         );
 
         let to_free_amount = Self::free_balance_of((to.clone(), hash.clone()));
         let new_to_free_amount = to_free_amount + amount;
         ensure!(
-            new_to_free_amount.as_() <= u64::max_value(),
+            new_to_free_amount <= T::Balance::max_value(),
             "to free amount overflow"
         );
 
-        <BalanceOf<T>>::insert((sender.clone(), hash.clone()), new_from_amount);
-        <FreeBalanceOf<T>>::insert((sender.clone(), hash.clone()), new_from_free_amount);
-        <BalanceOf<T>>::insert((to.clone(), hash.clone()), new_to_amount);
-        <FreeBalanceOf<T>>::insert((to.clone(), hash.clone()), new_to_free_amount);
+        BalanceOf::<T>::insert((sender.clone(), hash.clone()), new_from_amount);
+        FreeBalanceOf::<T>::insert((sender.clone(), hash.clone()), new_from_free_amount);
+        BalanceOf::<T>::insert((to.clone(), hash.clone()), new_to_amount);
+        FreeBalanceOf::<T>::insert((to.clone(), hash.clone()), new_to_free_amount);
 
         Ok(())
     }
@@ -157,7 +158,7 @@ impl<T: Trait> Module<T> {
         ensure!(token.is_some(), "no matching token found");
 
         ensure!(
-            <FreeBalanceOf<T>>::exists((sender.clone(), hash)),
+            FreeBalanceOf::<T>::exists((sender.clone(), hash)),
             "sender does not have the token"
         );
 
@@ -169,12 +170,12 @@ impl<T: Trait> Module<T> {
 
         let old_freezed_amount = Self::freezed_balance_of((sender.clone(), hash.clone()));
         ensure!(
-            (old_freezed_amount + amount).as_() <= u64::max_value(),
+            old_freezed_amount + amount <= T::Balance::max_value(),
             "freezed amount overflow"
         );
 
-        <FreeBalanceOf<T>>::insert((sender.clone(), hash.clone()), old_free_amount - amount);
-        <FreezedBalanceOf<T>>::insert((sender.clone(), hash.clone()), old_freezed_amount + amount);
+        FreeBalanceOf::<T>::insert((sender.clone(), hash.clone()), old_free_amount - amount);
+        FreezedBalanceOf::<T>::insert((sender.clone(), hash.clone()), old_freezed_amount + amount);
 
         Self::deposit_event(RawEvent::Freezed(sender, hash, amount));
 
@@ -186,7 +187,7 @@ impl<T: Trait> Module<T> {
         ensure!(token.is_some(), "no matching token found");
 
         ensure!(
-            <FreeBalanceOf<T>>::exists((sender.clone(), hash)),
+            FreeBalanceOf::<T>::exists((sender.clone(), hash)),
             "sender does not have the token"
         );
 
@@ -198,12 +199,12 @@ impl<T: Trait> Module<T> {
 
         let old_free_amount = Self::free_balance_of((sender.clone(), hash.clone()));
         ensure!(
-            (old_free_amount + amount).as_() <= u64::max_value(),
+            old_free_amount + amount <= T::Balance::max_value(),
             "unfreezed amount overflow"
         );
 
-        <FreeBalanceOf<T>>::insert((sender.clone(), hash.clone()), old_free_amount + amount);
-        <FreezedBalanceOf<T>>::insert((sender.clone(), hash.clone()), old_freezed_amount - amount);
+        FreeBalanceOf::<T>::insert((sender.clone(), hash.clone()), old_free_amount + amount);
+        FreezedBalanceOf::<T>::insert((sender.clone(), hash.clone()), old_freezed_amount - amount);
 
         Self::deposit_event(RawEvent::UnFreezed(sender, hash, amount));
 
@@ -215,7 +216,7 @@ impl<T: Trait> Module<T> {
         ensure!(token.is_some(), "no matching token found");
 
         ensure!(
-            <FreeBalanceOf<T>>::exists((sender.clone(), hash.clone())),
+            FreeBalanceOf::<T>::exists((sender.clone(), hash.clone())),
             "sender does not have the token"
         );
 
@@ -236,12 +237,14 @@ mod tests {
 
     use primitives::{Blake2Hasher, H256};
     use runtime_io::with_externalities;
-    use runtime_primitives::{
-        testing::{Digest, DigestItem, Header},
+    use sr_primitives::weights::Weight;
+    use sr_primitives::Perbill;
+    use sr_primitives::{
+        testing::Header,
         traits::{BlakeTwo256, IdentityLookup},
-        BuildStorage,
     };
-    use support::{assert_err, assert_ok, impl_outer_origin};
+    use std::cell::RefCell;
+    use support::{assert_err, assert_ok, impl_outer_origin, parameter_types, traits::Get};
 
     impl_outer_origin! {
         pub enum Origin for Test {}
@@ -252,18 +255,66 @@ mod tests {
     // configuration traits of modules we want to use.
     #[derive(Clone, Eq, PartialEq)]
     pub struct Test;
+    parameter_types! {
+        pub const BlockHashCount: u64 = 250;
+        pub const MaximumBlockWeight: Weight = 1024;
+        pub const MaximumBlockLength: u32 = 2 * 1024;
+        pub const AvailableBlockRatio: Perbill = Perbill::from_percent(75);
+        pub const BalancesTransactionBaseFee: u64 = 0;
+        pub const BalancesTransactionByteFee: u64 = 0;
+    }
     impl system::Trait for Test {
         type Origin = Origin;
+        type Call = ();
         type Index = u64;
         type BlockNumber = u64;
         type Hash = H256;
         type Hashing = BlakeTwo256;
-        type Digest = Digest;
         type AccountId = u64;
         type Lookup = IdentityLookup<Self::AccountId>;
         type Header = Header;
+        type WeightMultiplierUpdate = ();
         type Event = ();
-        type Log = DigestItem;
+        type BlockHashCount = BlockHashCount;
+        type MaximumBlockWeight = MaximumBlockWeight;
+        type MaximumBlockLength = MaximumBlockLength;
+        type AvailableBlockRatio = AvailableBlockRatio;
+        type Version = ();
+    }
+
+    thread_local! {
+        static EXISTENTIAL_DEPOSIT: RefCell<u128> = RefCell::new(0);
+        static TRANSFER_FEE: RefCell<u128> = RefCell::new(0);
+        static CREATION_FEE: RefCell<u128> = RefCell::new(0);
+        static BLOCK_GAS_LIMIT: RefCell<u128> = RefCell::new(0);
+    }
+
+    pub struct ExistentialDeposit;
+    impl Get<u128> for ExistentialDeposit {
+        fn get() -> u128 {
+            EXISTENTIAL_DEPOSIT.with(|v| *v.borrow())
+        }
+    }
+
+    pub struct TransferFee;
+    impl Get<u128> for TransferFee {
+        fn get() -> u128 {
+            TRANSFER_FEE.with(|v| *v.borrow())
+        }
+    }
+
+    pub struct CreationFee;
+    impl Get<u128> for CreationFee {
+        fn get() -> u128 {
+            CREATION_FEE.with(|v| *v.borrow())
+        }
+    }
+
+    pub struct BlockGasLimit;
+    impl Get<u128> for BlockGasLimit {
+        fn get() -> u128 {
+            BLOCK_GAS_LIMIT.with(|v| *v.borrow())
+        }
     }
 
     impl balances::Trait for Test {
@@ -278,23 +329,29 @@ mod tests {
         type TransactionPayment = ();
         type DustRemoval = ();
         type TransferPayment = ();
+
+        type ExistentialDeposit = ExistentialDeposit;
+        type TransferFee = TransferFee;
+        type CreationFee = CreationFee;
+        type TransactionBaseFee = BalancesTransactionBaseFee;
+        type TransactionByteFee = BalancesTransactionByteFee;
+        type WeightToFee = ();
     }
 
     impl super::Trait for Test {
         type Event = ();
     }
 
-    type TokenModule = super::Module<Test>;
-
     // This function basically just builds a genesis storage key/value store according to
     // our desired mockup.
     fn new_test_ext() -> runtime_io::TestExternalities<Blake2Hasher> {
-        system::GenesisConfig::<Test>::default()
-            .build_storage()
+        system::GenesisConfig::default()
+            .build_storage::<Test>()
             .unwrap()
-            .0
             .into()
     }
+
+    type TokenModule = super::Module<Test>;
 
     #[test]
     fn token_related_test_case() {

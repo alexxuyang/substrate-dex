@@ -1,83 +1,103 @@
 [[bin]]
-name = 'dex'
+name = 'dex-v2'
 path = 'src/main.rs'
 [profile.release]
 panic = 'unwind'
 
+[workspace]
+members = ['runtime']
+
+[package]
+authors = ['alexxu']
+build = 'build.rs'
+edition = '2018'
+name = 'dex-v2'
+version = '2.0.0'
+
 [dependencies]
-error-chain = '0.12'
+derive_more = '0.14.0'
 exit-future = '0.1'
 futures = '0.1'
-hex-literal = '0.1'
 log = '0.4'
-parity-codec = '3.2'
-parking_lot = '0.7.1'
+parking_lot = '0.9.0'
 tokio = '0.1'
-trie-root = '0.12.0'
+trie-root = '0.15.2'
+
+[dependencies.babe]
+git = 'https://github.com/paritytech/substrate.git'
+package = 'substrate-consensus-babe'
+rev = '447e6ea239b7b033c3c440b398d47c567f8874d6'
+
+[dependencies.babe-primitives]
+git = 'https://github.com/paritytech/substrate.git'
+package = 'substrate-consensus-babe-primitives'
+rev = '447e6ea239b7b033c3c440b398d47c567f8874d6'
 
 [dependencies.basic-authorship]
 git = 'https://github.com/paritytech/substrate.git'
 package = 'substrate-basic-authorship'
-branch = 'v1.0'
+rev = '447e6ea239b7b033c3c440b398d47c567f8874d6'
 
-[dependencies.consensus]
-git = 'https://github.com/paritytech/substrate.git'
-package = 'substrate-consensus-aura'
-branch = 'v1.0'
+[dependencies.codec]
+package = 'parity-scale-codec'
+version = '1.0.0'
 
 [dependencies.ctrlc]
 features = ['termination']
 version = '3.0'
 
+[dependencies.grandpa]
+git = 'https://github.com/paritytech/substrate.git'
+package = 'substrate-finality-grandpa'
+rev = '447e6ea239b7b033c3c440b398d47c567f8874d6'
+
+[dependencies.grandpa-primitives]
+git = 'https://github.com/paritytech/substrate.git'
+package = 'substrate-finality-grandpa-primitives'
+rev = '447e6ea239b7b033c3c440b398d47c567f8874d6'
+
 [dependencies.inherents]
 git = 'https://github.com/paritytech/substrate.git'
 package = 'substrate-inherents'
-branch = 'v1.0'
+rev = '447e6ea239b7b033c3c440b398d47c567f8874d6'
 
 [dependencies.network]
 git = 'https://github.com/paritytech/substrate.git'
 package = 'substrate-network'
-branch = 'v1.0'
+rev = '447e6ea239b7b033c3c440b398d47c567f8874d6'
 
-[dependencies.dex-runtime]
+[dependencies.dex-v2-runtime]
 path = 'runtime'
 
 [dependencies.primitives]
 git = 'https://github.com/paritytech/substrate.git'
 package = 'substrate-primitives'
-branch = 'v1.0'
+rev = '447e6ea239b7b033c3c440b398d47c567f8874d6'
 
 [dependencies.sr-io]
 git = 'https://github.com/paritytech/substrate.git'
-branch = 'v1.0'
+rev = '447e6ea239b7b033c3c440b398d47c567f8874d6'
 
 [dependencies.substrate-cli]
 git = 'https://github.com/paritytech/substrate.git'
-branch = 'v1.0'
+rev = '447e6ea239b7b033c3c440b398d47c567f8874d6'
 
 [dependencies.substrate-client]
 git = 'https://github.com/paritytech/substrate.git'
-branch = 'v1.0'
+rev = '447e6ea239b7b033c3c440b398d47c567f8874d6'
 
 [dependencies.substrate-executor]
 git = 'https://github.com/paritytech/substrate.git'
-branch = 'v1.0'
+rev = '447e6ea239b7b033c3c440b398d47c567f8874d6'
 
 [dependencies.substrate-service]
 git = 'https://github.com/paritytech/substrate.git'
-branch = 'v1.0'
+rev = '447e6ea239b7b033c3c440b398d47c567f8874d6'
 
 [dependencies.transaction-pool]
 git = 'https://github.com/paritytech/substrate.git'
 package = 'substrate-transaction-pool'
-branch = 'v1.0'
-
-[package]
-authors = ['Parity Technologies <admin@parity.io>']
-build = 'build.rs'
-edition = '2018'
-name = 'dex'
-version = '1.0.0'
+rev = '447e6ea239b7b033c3c440b398d47c567f8874d6'
 
 [build-dependencies]
 vergen = '3'
