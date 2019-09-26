@@ -1,10 +1,11 @@
-use support::{decl_module, decl_storage, decl_event, StorageValue, StorageMap, dispatch::Result, ensure, Parameter, print};
+use support::{decl_module, decl_storage, decl_event, StorageValue, StorageMap, dispatch::Result, ensure, Parameter};
 use sr_primitives::traits::{SimpleArithmetic, Bounded, Member, Zero, CheckedSub, Hash};
 use primitives::{U256};
 use system::ensure_signed;
 use codec::{Encode, Decode};
 use rstd::{prelude::*, result, ops::Not};
 use core::convert::{TryInto, TryFrom};
+use byteorder::{ByteOrder, LittleEndian};
 
 use crate::token;
 use crate::types;
@@ -278,6 +279,13 @@ decl_module! {
 			Self::do_create_limit_order(sender, base, quote, otype, price, sell_amount)
 		}
 
+		pub fn create_limit_order_with_le_float(origin, base: T::Hash, quote: T::Hash, otype: OrderType, price: Vec<u8>, sell_amount: T::Balance) -> Result {
+			let sender = ensure_signed(origin)?;
+
+			let price = Self::price_as_vec_u8_to_x_by_100M(price)?;
+			Self::do_create_limit_order(sender, base, quote, otype, price, sell_amount)
+		}
+
 		pub fn cancel_limit_order(origin, order_hash: T::Hash) -> Result {
 			let sender = ensure_signed(origin)?;
 
@@ -291,6 +299,20 @@ impl<T: Trait> Module<T> {
 		ensure!(price > Zero::zero() && price <= T::Price::max_value(), "price bounds check failed");
 		ensure!(sell_amount > Zero::zero() && sell_amount <= T::Balance::max_value(), "sell amount bound check failed");
 		Ok(())
+	}
+
+	fn price_as_vec_u8_to_x_by_100M(price: Vec<u8>) -> result::Result<T::Price, &'static str> {
+		
+		ensure!(price.len() >= 8, "price length is less than 8");
+
+		let price = LittleEndian::read_f64(price.as_slice());
+
+		let price_v2 = (PRICE_FACTOR as f64 * price) as u128;
+		let price_v3 = price_v2 as f64 / PRICE_FACTOR as f64;
+
+		ensure!(price == price_v3, "price have more digits than required");
+
+		TryFrom::try_from(price_v2).map_err(|_| "number cast error")
 	}
 
 	fn ensure_counterparty_amount_bounds(otype: OrderType, price:T::Price, amount: T::Balance) 
@@ -1417,7 +1439,9 @@ mod tests {
 			// [Market Trades]
 			output_order(tp_hash);
 
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(bob), base, quote, OrderType::Sell, 18_000_000, 200));
+			let p: [u8; 8] = [10, 215, 163, 112, 61, 10, 199, 63]; // 18_000_000
+			assert_ok!(TradeModule::create_limit_order_with_le_float(Origin::signed(bob), base, quote, OrderType::Sell, p.to_vec(), 200));
+
 			let order1_hash = TradeModule::owned_order((bob, 0)).unwrap();
 			let mut order1 = TradeModule::order(order1_hash).unwrap();
 			assert_eq!(order1.sell_amount, 200);
@@ -1425,7 +1449,8 @@ mod tests {
 			assert_eq!(order1.buy_amount, 36);
 			assert_eq!(order1.remained_buy_amount, 36);
 
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(bob), base, quote, OrderType::Sell, 10_000_000, 10));
+			let p: [u8; 8] = [154, 153, 153, 153, 153, 153, 185, 63]; // 10_000_000
+			assert_ok!(TradeModule::create_limit_order_with_le_float(Origin::signed(bob), base, quote, OrderType::Sell, p.to_vec(), 10));
 			let order2_hash = TradeModule::owned_order((bob, 1)).unwrap();
 			let mut order2 = TradeModule::order(order2_hash).unwrap();
 			assert_eq!(order2.sell_amount, 10);
@@ -1441,7 +1466,8 @@ mod tests {
 			assert_eq!(order3.buy_amount, 11);
 			assert_eq!(order3.remained_buy_amount, 11);
 
-			assert_ok!(TradeModule::create_limit_order(Origin::signed(bob), base, quote, OrderType::Sell, 11_000_000, 10000));
+			let p: [u8; 8] = [41, 92, 143, 194, 245, 40, 188, 63]; // 11_000_000
+			assert_ok!(TradeModule::create_limit_order_with_le_float(Origin::signed(bob), base, quote, OrderType::Sell, p.to_vec(), 10000));
 			let order4_hash = TradeModule::owned_order((bob, 3)).unwrap();
 			let mut order4 = TradeModule::order(order4_hash).unwrap();
 			assert_eq!(order4.sell_amount, 10000);
@@ -2442,6 +2468,47 @@ mod tests {
 			let amount = from_128(u128::max_value() - 1).unwrap();
 			let otype = OrderType::Sell;
 			assert_err!(TradeModule::ensure_counterparty_amount_bounds(otype, price, amount), "counterparty bound check failed");
+		});
+	}
+
+	#[test]
+	fn price_as_vec_u8_to_x_by_100M_test_case() {
+		with_externalities(&mut new_test_ext(), || {
+			assert_eq!(1, 1);
+
+			let price_v1 = 3.11122233f64;
+			let price_v1_vec_u8: [u8; 8] = [183, 122, 111, 136, 200, 227, 8, 64];
+			let price_v2 = 311122233u128;
+			assert_ok!(TradeModule::price_as_vec_u8_to_x_by_100M(price_v1_vec_u8.to_vec()), price_v2);
+
+			let price_v1 = 123.00000000f64;
+			let price_v1_vec_u8: [u8; 8] = [0, 0, 0, 0, 0, 192, 94, 64];
+			let price_v2 = 12_300_000_000;
+			assert_ok!(TradeModule::price_as_vec_u8_to_x_by_100M(price_v1_vec_u8.to_vec()), price_v2);
+
+			let price_v1 = 999.6789f64;
+			let price_v1_vec_u8: [u8; 8] = [9, 138, 31, 99, 110, 61, 143, 64];
+			let price_v2 = 99_967_890_000u128;
+			assert_ok!(TradeModule::price_as_vec_u8_to_x_by_100M(price_v1_vec_u8.to_vec()), price_v2);
+
+			let price_v1 = 0.00000001f64;
+			let price_v1_vec_u8: [u8; 8] = [58, 140, 48, 226, 142, 121, 69, 62];
+			let price_v2 = 1u128;
+			assert_ok!(TradeModule::price_as_vec_u8_to_x_by_100M(price_v1_vec_u8.to_vec()), price_v2);
+
+			let price_v1_vec_u8: [u8; 7] = [255, 142, 214, 136, 200, 227, 8];
+			assert_err!(TradeModule::price_as_vec_u8_to_x_by_100M(price_v1_vec_u8.to_vec()), 
+				"price length is less than 8");
+
+			let price_v1 = 3.111222333f64;
+			let price_v1_vec_u8: [u8; 8] = [255, 142, 214, 136, 200, 227, 8, 64];
+			assert_err!(TradeModule::price_as_vec_u8_to_x_by_100M(price_v1_vec_u8.to_vec()), 
+				"price have more digits than required");
+
+			let price_v1 = 3.000011112222f64;
+			let price_v1_vec_u8: [u8; 8] = [101, 10, 117, 211, 5, 0, 8, 64];
+			assert_err!(TradeModule::price_as_vec_u8_to_x_by_100M(price_v1_vec_u8.to_vec()), 
+				"price have more digits than required");
 		});
 	}
 }
