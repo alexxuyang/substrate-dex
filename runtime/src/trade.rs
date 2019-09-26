@@ -21,9 +21,14 @@ pub struct TradePair<T> where T: Trait {
 	hash: T::Hash,
 	base: T::Hash,
 	quote: T::Hash,
+
 	buy_one_price: Option<T::Price>,
 	sell_one_price: Option<T::Price>,
 	latest_matched_price: Option<T::Price>,
+	
+	one_day_trade_volume: T::Balance, // sum of quote qty
+	one_day_highest_price: Option<T::Price>,
+	one_day_lowest_price: Option<T::Price>,
 }
 
 #[derive(Encode, Decode, Clone, Copy, PartialEq, Eq)]
@@ -86,6 +91,7 @@ pub struct Trade<T> where T: Trait {
 }
 
 const PRICE_FACTOR: u128 = 100_000_000;
+const DAYS: u32 = crate::DAYS;
 
 impl<T> LimitOrder<T> where T: Trait {
 	fn new(base: T::Hash, quote: T::Hash, owner: T::AccountId, price: T::Price, sell_amount: T::Balance, 
@@ -147,38 +153,45 @@ type OrderLinkedItemList<T> = types::LinkedList<T, LinkedItemList<T>, <T as syst
 
 decl_storage! {
 	trait Store for Module<T: Trait> as TradeModule {
-		//	TradePairHash => TradePair
+		///	TradePairHash => TradePair
 		TradePairs get(trade_pair): map T::Hash => Option<TradePair<T>>;
-		// (BaseTokenHash, quoteTokenHash) => TradePairHash
+		/// (BaseTokenHash, quoteTokenHash) => TradePairHash
 		TradePairsHashByBaseQuote get(trade_pair_hash_by_base_quote): map (T::Hash, T::Hash) => Option<T::Hash>;
+		/// Index => TradePairHash
+		TradePairsHashByIndex get(trade_pair_hash_by_index): map u32 => Option<T::Hash>;
+		/// Index
+		TradePairsIndex get(trade_pair_index): u32;
 
-		// OrderHash => Order
+		/// OrderHash => Order
 		Orders get(order): map T::Hash => Option<LimitOrder<T>>;
-		// (AccoundId, Index) => OrderHash
+		/// (AccoundId, Index) => OrderHash
 		OwnedOrders get(owned_order): map (T::AccountId, u64) => Option<T::Hash>;
-		//	AccountId => Index
+		///	AccountId => Index
 		OwnedOrdersIndex get(owned_orders_index): map T::AccountId => u64;
-		// OrderHash => Vec<TradeHash>
+		/// OrderHash => Vec<TradeHash>
 		OrderOwnedTrades get(order_owned_trade): map T::Hash => Option<Vec<T::Hash>>;
 
-		//	(TradePairHash, Index) => OrderHash
+		/// (TradePairHash, Index) => OrderHash
 		TradePairOwnedOrders get(trade_pair_owned_order): map (T::Hash, u64) => Option<T::Hash>;
-		//	TradePairHash => Index
+		/// TradePairHash => Index
 		TradePairOwnedOrdersIndex get(trade_pair_owned_order_index): map T::Hash => u64;
 
-		// (TradePairHash, Price) => LinkedItem
+		/// (TradePairHash, Price) => LinkedItem
 		LinkedItemList get(linked_item): map (T::Hash, Option<T::Price>) => Option<OrderLinkedItem<T>>;
 
-		// TradeHash => Trade
+		/// TradeHash => Trade
 		Trades get(trade): map T::Hash => Option<Trade<T>>;
 
-		// AccountId => Vec<TradeHash>
+		/// AccountId => Vec<TradeHash>
 		OwnedTrades get(owned_trade): map T::AccountId => Option<Vec<T::Hash>>;
-		// (AccountId, TradePairHash) => Vec<TradeHash>
+		/// (AccountId, TradePairHash) => Vec<TradeHash>
 		OwnedTPTrades get(owned_trade_pair_trade): map (T::AccountId, T::Hash) => Option<Vec<T::Hash>>;
 
-		// TradePairHash => Vec<TradeHash>
+		/// TradePairHash => Vec<TradeHash>
 		TradePairOwnedTrades get(trade_pair_owned_trade): map T::Hash => Option<Vec<T::Hash>>;
+
+		/// (TradePairHash, BlockNumber) => Sum of Trade Volume
+		TPTradeVolumeByBlock get(trade_pair_trade_vaolume_by_block): map (T::Hash, T::BlockNumber) => T::Balance;
 
 		Nonce: u64;
 	}
@@ -282,7 +295,7 @@ decl_module! {
 		pub fn create_limit_order_with_le_float(origin, base: T::Hash, quote: T::Hash, otype: OrderType, price: Vec<u8>, sell_amount: T::Balance) -> Result {
 			let sender = ensure_signed(origin)?;
 
-			let price = Self::price_as_vec_u8_to_x_by_100M(price)?;
+			let price = Self::price_as_vec_u8_to_x_by_100m(price)?;
 			Self::do_create_limit_order(sender, base, quote, otype, price, sell_amount)
 		}
 
@@ -290,6 +303,32 @@ decl_module! {
 			let sender = ensure_signed(origin)?;
 
 			Self::do_cancel_limit_order(sender, order_hash)
+		}
+
+		fn on_initialize(block_number: T::BlockNumber) {
+			let days: T::BlockNumber = <<T as system::Trait>::BlockNumber as From<_>>::from(DAYS);
+
+			if block_number < days {
+				return
+			}
+
+			for index in 0 .. TradePairsIndex::get() {
+				let tp_hash = TradePairsHashByIndex::<T>::get(index).unwrap();
+				let mut tp = TradePairs::<T>::get(tp_hash).unwrap();
+				let amount = TPTradeVolumeByBlock::<T>::get((tp_hash, block_number - days));
+				tp.one_day_trade_volume = tp.one_day_trade_volume - amount;
+				TradePairs::<T>::insert(tp_hash, tp);
+			}
+		}
+
+		fn on_finalize(block_number: T::BlockNumber) {
+			for index in 0 .. TradePairsIndex::get() {
+				let tp_hash = TradePairsHashByIndex::<T>::get(index).unwrap();
+				let mut tp = TradePairs::<T>::get(tp_hash).unwrap();
+				let amount = TPTradeVolumeByBlock::<T>::get((tp_hash, block_number));
+				tp.one_day_trade_volume = tp.one_day_trade_volume + amount;
+				TradePairs::<T>::insert(tp_hash, tp);
+			}
 		}
 	}
 }
@@ -301,7 +340,7 @@ impl<T: Trait> Module<T> {
 		Ok(())
 	}
 
-	fn price_as_vec_u8_to_x_by_100M(price: Vec<u8>) -> result::Result<T::Price, &'static str> {
+	fn price_as_vec_u8_to_x_by_100m(price: Vec<u8>) -> result::Result<T::Price, &'static str> {
 		
 		ensure!(price.len() >= 8, "price length is less than 8");
 
@@ -390,11 +429,18 @@ impl<T: Trait> Module<T> {
 			buy_one_price: None,
 			sell_one_price: None,
 			latest_matched_price: None,
+			one_day_trade_volume: Default::default(),
+			one_day_highest_price: None,
+			one_day_lowest_price: None,
 		};
 
 		Nonce::mutate(|n| *n += 1);
 		TradePairs::insert(hash, tp.clone());
 		TradePairsHashByBaseQuote::<T>::insert((base, quote), hash);
+
+		let index = Self::trade_pair_index();
+		TradePairsHashByIndex::<T>::insert(index, hash);
+		TradePairsIndex::mutate(|n| *n += 1);
 
 		Self::deposit_event(RawEvent::TradePairCreated(sender, hash, tp));
 
@@ -483,7 +529,7 @@ impl<T: Trait> Module<T> {
 				break;
 			}
 
-			let item_price = item_price.ok_or("can not unwarp item price")?;
+			let item_price = item_price.ok_or("can not unwrap item price")?;
 
 			if !Self::price_matched(oprice, otype, item_price) {
 				break
@@ -552,8 +598,8 @@ impl<T: Trait> Module<T> {
 				Orders::insert(order.hash.clone(), order.clone());
 				Orders::insert(o.hash.clone(), o.clone());
 
-				// save the trade pair lastest matched price
-				Self::set_tp_latest_matched_price(tp_hash, Some(o.price))?;
+				// save the trade pair market data
+				Self::set_tp_market_data(tp_hash, o.price, quote_qty)?;
 
 				// remove the matched order
 				<OrderLinkedItemList<T>>::remove_all(tp_hash, !otype);
@@ -592,11 +638,11 @@ impl<T: Trait> Module<T> {
 		}
 	}
 
-	fn into_128<TT: TryInto<u128>>(i: TT) -> result::Result<u128, &'static str> {
+	fn into_128<A: TryInto<u128>>(i: A) -> result::Result<u128, &'static str> {
 		TryInto::<u128>::try_into(i).map_err(|_| "number cast error")
 	}
 
-	fn from_128<TT: TryFrom<u128>>(i: u128) -> result::Result<TT, &'static str> {
+	fn from_128<A: TryFrom<u128>>(i: u128) -> result::Result<A, &'static str> {
 		TryFrom::<u128>::try_from(i).map_err(|_| "number cast error")
 	}
 
@@ -687,11 +733,35 @@ impl<T: Trait> Module<T> {
 		Ok(())
 	}
 
-	pub fn set_tp_latest_matched_price(tp_hash: T::Hash, price: Option<T::Price>) -> Result {
+	pub fn set_tp_market_data(tp_hash: T::Hash, price: T::Price, amount: T::Balance) -> Result {
 
 		let mut tp = <TradePairs<T>>::get(tp_hash).ok_or("can not get trade pair")?;
 		
-		tp.latest_matched_price = price;
+		tp.latest_matched_price = Some(price);
+
+		match tp.one_day_highest_price {
+			Some(tp_h_price) => {
+				if price > tp_h_price {
+					tp.one_day_highest_price = Some(price);
+				}
+			},
+			None => {
+				tp.one_day_highest_price = Some(price);
+			},
+		}
+
+		match tp.one_day_lowest_price {
+			Some(tp_l_price) => {
+				if price < tp_l_price {
+					tp.one_day_lowest_price = Some(price);
+				}
+			},
+			None => {
+				tp.one_day_lowest_price = Some(price);
+			},
+		}
+
+		<TPTradeVolumeByBlock<T>>::mutate((tp_hash, <system::Module<T>>::block_number()), |x| *x += amount);
 
 		<TradePairs<T>>::insert(tp_hash, tp);
 
@@ -730,7 +800,6 @@ mod tests {
 	};
     use std::cell::RefCell;
     use support::{assert_err, assert_ok, impl_outer_origin, parameter_types, traits::Get};
-	use core::convert::{TryInto, TryFrom};
 
 	impl_outer_origin! {
 		pub enum Origin for Test {}
@@ -796,13 +865,6 @@ mod tests {
         }
     }
 
-    pub struct BlockGasLimit;
-    impl Get<u128> for BlockGasLimit {
-        fn get() -> u128 {
-            BLOCK_GAS_LIMIT.with(|v| *v.borrow())
-        }
-    }
-
     impl balances::Trait for Test {
         type Balance = u128;
 
@@ -844,10 +906,6 @@ mod tests {
 
 	type TokenModule = token::Module<Test>;
 	type TradeModule = super::Module<Test>;
-
-	fn from_128<TT: TryFrom<u128>>(i: u128) -> result::Result<TT, &'static str> {
-		TryFrom::<u128>::try_from(i).map_err(|_| "number cast error")
-	}
 
 	fn output_order(tp_hash: <Test as system::Trait>::Hash) {
 
@@ -2379,7 +2437,7 @@ mod tests {
 				base: H256::from_low_u64_be(0),
 				quote: H256::from_low_u64_be(0),
 				owner: alice,
-				price: from_128(25010000).unwrap(),
+				price: TradeModule::from_128(25010000).unwrap(),
 				sell_amount: 2501,
 				remained_sell_amount: 2501,
 				buy_amount: 10000,
@@ -2393,7 +2451,7 @@ mod tests {
 				base: H256::from_low_u64_be(0),
 				quote: H256::from_low_u64_be(0),
 				owner: bob,
-				price: from_128(25000000).unwrap(),
+				price: TradeModule::from_128(25000000).unwrap(),
 				sell_amount: 4,
 				remained_sell_amount: 4,
 				buy_amount: 1,
@@ -2410,7 +2468,7 @@ mod tests {
 			assert_eq!(result.0, 1);
 			assert_eq!(result.1, 4);
 
-			order2.price = from_128(25_010_000).unwrap();
+			order2.price = TradeModule::from_128(25_010_000).unwrap();
 			let result = TradeModule::calculate_ex_amount(&order1, &order2).unwrap();
 			assert_eq!(result.0, 1);
 			assert_eq!(result.1, 4);
@@ -2419,7 +2477,7 @@ mod tests {
 			assert_eq!(result.0, 1);
 			assert_eq!(result.1, 4);
 
-			order2.price = from_128(33_000_000).unwrap();
+			order2.price = TradeModule::from_128(33_000_000).unwrap();
 			let result = TradeModule::calculate_ex_amount(&order1, &order2).unwrap();
 			assert_eq!(result.0, 1);
 			assert_eq!(result.1, 4);
@@ -2428,7 +2486,7 @@ mod tests {
 			assert_eq!(result.0, 1);
 			assert_eq!(result.1, 4);
 
-			order2.price = from_128(35_000_000).unwrap();
+			order2.price = TradeModule::from_128(35_000_000).unwrap();
 			let result = TradeModule::calculate_ex_amount(&order1, &order2).unwrap();
 			assert_eq!(result.0, 1);
 			assert_eq!(result.1, 4);
@@ -2444,70 +2502,70 @@ mod tests {
 		with_externalities(&mut new_test_ext(), || {
 			assert_eq!(1, 1);
 
-			let price = from_128(25_010_000).unwrap();
-			let amount = from_128(2501).unwrap();
+			let price = TradeModule::from_128(25_010_000).unwrap();
+			let amount = TradeModule::from_128(2501).unwrap();
 			let otype = OrderType::Buy;
 			assert_ok!(TradeModule::ensure_counterparty_amount_bounds(otype, price, amount), 10000u128);
 			
-			let price = from_128(25_010_000).unwrap(); // 0.2501
-			let amount = from_128(2500).unwrap();
+			let price = TradeModule::from_128(25_010_000).unwrap(); // 0.2501
+			let amount = TradeModule::from_128(2500).unwrap();
 			let otype = OrderType::Buy;
 			assert_err!(TradeModule::ensure_counterparty_amount_bounds(otype, price, amount), "amount have digits parts");
 
-			let price = from_128(25_000_000).unwrap(); // 0.25
-			let amount = from_128(24).unwrap();
+			let price = TradeModule::from_128(25_000_000).unwrap(); // 0.25
+			let amount = TradeModule::from_128(24).unwrap();
 			let otype = OrderType::Sell;
 			assert_ok!(TradeModule::ensure_counterparty_amount_bounds(otype, price, amount), 6u128);
 			
-			let price = from_128(25_000_000).unwrap(); // 0.25
-			let amount = from_128(21).unwrap();
+			let price = TradeModule::from_128(25_000_000).unwrap(); // 0.25
+			let amount = TradeModule::from_128(21).unwrap();
 			let otype = OrderType::Sell;
 			assert_err!(TradeModule::ensure_counterparty_amount_bounds(otype, price, amount), "amount have digits parts");
 
-			let price = from_128(200_000_000).unwrap(); // 2.0
-			let amount = from_128(u128::max_value() - 1).unwrap();
+			let price = TradeModule::from_128(200_000_000).unwrap(); // 2.0
+			let amount = TradeModule::from_128(u128::max_value() - 1).unwrap();
 			let otype = OrderType::Sell;
 			assert_err!(TradeModule::ensure_counterparty_amount_bounds(otype, price, amount), "counterparty bound check failed");
 		});
 	}
 
 	#[test]
-	fn price_as_vec_u8_to_x_by_100M_test_case() {
+	fn price_as_vec_u8_to_x_by_100m_test_case() {
 		with_externalities(&mut new_test_ext(), || {
 			assert_eq!(1, 1);
 
-			let price_v1 = 3.11122233f64;
+			let _price_v1 = 3.11122233f64;
 			let price_v1_vec_u8: [u8; 8] = [183, 122, 111, 136, 200, 227, 8, 64];
 			let price_v2 = 311122233u128;
-			assert_ok!(TradeModule::price_as_vec_u8_to_x_by_100M(price_v1_vec_u8.to_vec()), price_v2);
+			assert_ok!(TradeModule::price_as_vec_u8_to_x_by_100m(price_v1_vec_u8.to_vec()), price_v2);
 
-			let price_v1 = 123.00000000f64;
+			let _price_v1 = 123.00000000f64;
 			let price_v1_vec_u8: [u8; 8] = [0, 0, 0, 0, 0, 192, 94, 64];
 			let price_v2 = 12_300_000_000;
-			assert_ok!(TradeModule::price_as_vec_u8_to_x_by_100M(price_v1_vec_u8.to_vec()), price_v2);
+			assert_ok!(TradeModule::price_as_vec_u8_to_x_by_100m(price_v1_vec_u8.to_vec()), price_v2);
 
-			let price_v1 = 999.6789f64;
+			let _price_v1 = 999.6789f64;
 			let price_v1_vec_u8: [u8; 8] = [9, 138, 31, 99, 110, 61, 143, 64];
 			let price_v2 = 99_967_890_000u128;
-			assert_ok!(TradeModule::price_as_vec_u8_to_x_by_100M(price_v1_vec_u8.to_vec()), price_v2);
+			assert_ok!(TradeModule::price_as_vec_u8_to_x_by_100m(price_v1_vec_u8.to_vec()), price_v2);
 
-			let price_v1 = 0.00000001f64;
+			let _price_v1 = 0.00000001f64;
 			let price_v1_vec_u8: [u8; 8] = [58, 140, 48, 226, 142, 121, 69, 62];
 			let price_v2 = 1u128;
-			assert_ok!(TradeModule::price_as_vec_u8_to_x_by_100M(price_v1_vec_u8.to_vec()), price_v2);
+			assert_ok!(TradeModule::price_as_vec_u8_to_x_by_100m(price_v1_vec_u8.to_vec()), price_v2);
 
 			let price_v1_vec_u8: [u8; 7] = [255, 142, 214, 136, 200, 227, 8];
-			assert_err!(TradeModule::price_as_vec_u8_to_x_by_100M(price_v1_vec_u8.to_vec()), 
+			assert_err!(TradeModule::price_as_vec_u8_to_x_by_100m(price_v1_vec_u8.to_vec()), 
 				"price length is less than 8");
 
-			let price_v1 = 3.111222333f64;
+			let _price_v1 = 3.111222333f64;
 			let price_v1_vec_u8: [u8; 8] = [255, 142, 214, 136, 200, 227, 8, 64];
-			assert_err!(TradeModule::price_as_vec_u8_to_x_by_100M(price_v1_vec_u8.to_vec()), 
+			assert_err!(TradeModule::price_as_vec_u8_to_x_by_100m(price_v1_vec_u8.to_vec()), 
 				"price have more digits than required");
 
-			let price_v1 = 3.000011112222f64;
+			let _price_v1 = 3.000011112222f64;
 			let price_v1_vec_u8: [u8; 8] = [101, 10, 117, 211, 5, 0, 8, 64];
-			assert_err!(TradeModule::price_as_vec_u8_to_x_by_100M(price_v1_vec_u8.to_vec()), 
+			assert_err!(TradeModule::price_as_vec_u8_to_x_by_100m(price_v1_vec_u8.to_vec()), 
 				"price have more digits than required");
 		});
 	}

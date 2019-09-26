@@ -310,13 +310,6 @@ mod tests {
         }
     }
 
-    pub struct BlockGasLimit;
-    impl Get<u128> for BlockGasLimit {
-        fn get() -> u128 {
-            BLOCK_GAS_LIMIT.with(|v| *v.borrow())
-        }
-    }
-
     impl balances::Trait for Test {
         type Balance = u128;
 
