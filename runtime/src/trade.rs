@@ -2534,22 +2534,22 @@ mod tests {
 		with_externalities(&mut new_test_ext(), || {
 			assert_eq!(1, 1);
 
-			let _price_v1 = 3.11122233f64;
+			let price_v1 = 3.11122233f64;
 			let price_v1_vec_u8: [u8; 8] = [183, 122, 111, 136, 200, 227, 8, 64];
 			let price_v2 = 311122233u128;
 			assert_ok!(TradeModule::price_as_vec_u8_to_x_by_100m(price_v1_vec_u8.to_vec()), price_v2);
 
-			let _price_v1 = 123.00000000f64;
+			let price_v1 = 123.00000000f64;
 			let price_v1_vec_u8: [u8; 8] = [0, 0, 0, 0, 0, 192, 94, 64];
 			let price_v2 = 12_300_000_000;
 			assert_ok!(TradeModule::price_as_vec_u8_to_x_by_100m(price_v1_vec_u8.to_vec()), price_v2);
 
-			let _price_v1 = 999.6789f64;
+			let price_v1 = 999.6789f64;
 			let price_v1_vec_u8: [u8; 8] = [9, 138, 31, 99, 110, 61, 143, 64];
 			let price_v2 = 99_967_890_000u128;
 			assert_ok!(TradeModule::price_as_vec_u8_to_x_by_100m(price_v1_vec_u8.to_vec()), price_v2);
 
-			let _price_v1 = 0.00000001f64;
+			let price_v1 = 0.00000001f64;
 			let price_v1_vec_u8: [u8; 8] = [58, 140, 48, 226, 142, 121, 69, 62];
 			let price_v2 = 1u128;
 			assert_ok!(TradeModule::price_as_vec_u8_to_x_by_100m(price_v1_vec_u8.to_vec()), price_v2);
@@ -2558,12 +2558,12 @@ mod tests {
 			assert_err!(TradeModule::price_as_vec_u8_to_x_by_100m(price_v1_vec_u8.to_vec()), 
 				"price length is less than 8");
 
-			let _price_v1 = 3.111222333f64;
+			let price_v1 = 3.111222333f64;
 			let price_v1_vec_u8: [u8; 8] = [255, 142, 214, 136, 200, 227, 8, 64];
 			assert_err!(TradeModule::price_as_vec_u8_to_x_by_100m(price_v1_vec_u8.to_vec()), 
 				"price have more digits than required");
 
-			let _price_v1 = 3.000011112222f64;
+			let price_v1 = 3.000011112222f64;
 			let price_v1_vec_u8: [u8; 8] = [101, 10, 117, 211, 5, 0, 8, 64];
 			assert_err!(TradeModule::price_as_vec_u8_to_x_by_100m(price_v1_vec_u8.to_vec()), 
 				"price have more digits than required");
