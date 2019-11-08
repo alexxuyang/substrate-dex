@@ -4,10 +4,13 @@
     "symbol": "Vec<u8>",
     "total_supply": "Balance"
   },
+  "OrderType": {
+    "_enum": ["Buy", "Sell"]
+  },
   "TradePair": {
     "hash": "H256",
     "base": "H256",
-    "quoto": "H256",
+    "quote": "H256",
     "buy_one_price": "Option<Price>",
     "sell_one_price": "Option<Price>",
     "latest_matched_price": "Option<Price>",
@@ -16,11 +19,10 @@
     "one_day_lowest_price": "Option<Price>"
   },
   "Price": "u64",
-  "OrderType": "u8",
   "LimitOrder": {
     "hash": "H256",
     "base": "H256",
-    "quoto": "H256",
+    "quote": "H256",
     "owner": "AccountId",
     "price": "u64",
     "otype": "u64",

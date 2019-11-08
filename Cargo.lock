@@ -3173,6 +3173,7 @@ version = "2.0.0"
 source = "git+https://github.com/paritytech/substrate.git?rev=447e6ea239b7b033c3c440b398d47c567f8874d6#447e6ea239b7b033c3c440b398d47c567f8874d6"
 dependencies = [
  "blake2-rfc 0.2.18 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "proc-macro-crate 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "proc-macro2 0.4.30 (registry+https://github.com/rust-lang/crates.io-index)",
  "quote 0.6.13 (registry+https://github.com/rust-lang/crates.io-index)",
