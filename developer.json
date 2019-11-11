@@ -5,7 +5,10 @@
     "total_supply": "Balance"
   },
   "OrderType": {
-    "_enum": ["Buy", "Sell"]
+    "_enum": [
+      "Buy",
+      "Sell"
+    ]
   },
   "TradePair": {
     "hash": "H256",
@@ -18,7 +21,7 @@
     "one_day_highest_price": "Option<Price>",
     "one_day_lowest_price": "Option<Price>"
   },
-  "Price": "u64",
+  "Price": "u128",
   "LimitOrder": {
     "hash": "H256",
     "base": "H256",
