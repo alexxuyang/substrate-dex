@@ -10,6 +10,14 @@
       "Sell"
     ]
   },
+  "OrderStatus": {
+    "_enum": [
+      "Created",
+      "PartialFilled",
+      "Filled",
+      "Canceled"
+    ]
+  },
   "TradePair": {
     "hash": "H256",
     "base": "H256",
@@ -27,13 +35,13 @@
     "base": "H256",
     "quote": "H256",
     "owner": "AccountId",
-    "price": "u64",
-    "otype": "u64",
-    "status": "u64",
+    "price": "Price",
     "sell_amount": "Balance",
     "buy_amount": "Balance",
     "remained_sell_amount": "Balance",
-    "remained_buy_amount": "Balance"
+    "remained_buy_amount": "Balance",
+    "otype": "OrderType",
+    "status": "OrderStatus"
   },
   "Trade": {
     "hash": "H256",

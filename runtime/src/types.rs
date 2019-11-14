@@ -7,14 +7,16 @@ use crate::trade::{self, *};
 
 #[derive(Encode, Decode, Clone)]
 #[cfg_attr(feature = "std", derive(PartialEq, Eq, Debug))]
-pub struct LinkedItem<K1, K2> {
+pub struct LinkedItem<K1, K2, K3> {
 	pub prev: Option<K2>,
 	pub next: Option<K2>,
 	pub price: Option<K2>,
+	pub buy_amount: K3,
+	pub sell_amount: K3,
 	pub orders: Vec<K1>, // remove the item at 0 index will caused performance issue, should be optimized
 }
 
-pub struct LinkedList<T, S, K1, K2>(rstd::marker::PhantomData<(T, S, K1, K2)>);
+pub struct LinkedList<T, S, K1, K2, K3>(rstd::marker::PhantomData<(T, S, K1, K2, K3)>);
 
 ///             LinkedItem          LinkedItem			LinkedItem          LinkedItem          LinkedItem
 ///             Bottom              Buy Order			Head                Sell Order          Top
@@ -31,7 +33,7 @@ pub struct LinkedList<T, S, K1, K2>(rstd::marker::PhantomData<(T, S, K1, K2)>);
 /// when do order matching, o1 will match before o2 and so on
 
 // Self: StorageMap, Key1: TradePairHash, Key2: Price, Value: OrderHash
-impl<T, S, K1, K2> LinkedList<T, S, K1, K2>
+impl<T, S, K1, K2, K3> LinkedList<T, S, K1, K2, K3>
 where
 	T: trade::Trait,
 	K1: Encode
@@ -41,27 +43,30 @@ where
 		+ Copy
 		+ PartialEq,
 	K2: Parameter + Default + Member + Bounded + SimpleArithmetic + Copy,
-	S: StorageMap<(K1, Option<K2>), LinkedItem<K1, K2>, Query = Option<LinkedItem<K1, K2>>>,
+	K3: Parameter + Default + Member + Bounded + SimpleArithmetic + Copy,
+	S: StorageMap<(K1, Option<K2>), LinkedItem<K1, K2, K3>, Query = Option<LinkedItem<K1, K2, K3>>>,
 {
-	pub fn read_head(key: K1) -> LinkedItem<K1, K2> {
+	pub fn read_head(key: K1) -> LinkedItem<K1, K2, K3> {
 		Self::read(key, None)
 	}
 
-	pub fn read_bottom(key: K1) -> LinkedItem<K1, K2> {
+	pub fn read_bottom(key: K1) -> LinkedItem<K1, K2, K3> {
 		Self::read(key, Some(K2::min_value()))
 	}
 
-	pub fn read_top(key: K1) -> LinkedItem<K1, K2> {
+	pub fn read_top(key: K1) -> LinkedItem<K1, K2, K3> {
 		Self::read(key, Some(K2::max_value()))
 	}
 
-	pub fn read(key1: K1, key2: Option<K2>) -> LinkedItem<K1, K2> {
+	pub fn read(key1: K1, key2: Option<K2>) -> LinkedItem<K1, K2, K3> {
 		S::get((key1, key2)).unwrap_or_else(|| {
 			let bottom = LinkedItem {
 				prev: Some(K2::max_value()),
 				next: None,
 				price: Some(K2::min_value()),
 				orders: Vec::<K1>::new(),
+				buy_amount: Default::default(),
+				sell_amount: Default::default(),
 			};
 
 			let top = LinkedItem {
@@ -69,6 +74,8 @@ where
 				next: Some(K2::min_value()),
 				price: Some(K2::max_value()),
 				orders: Vec::<K1>::new(),
+				buy_amount: Default::default(),
+				sell_amount: Default::default(),
 			};
 
 			let head = LinkedItem {
@@ -76,6 +83,8 @@ where
 				next: Some(K2::max_value()),
 				price: None,
 				orders: Vec::<K1>::new(),
+				buy_amount: Default::default(),
+				sell_amount: Default::default(),
 			};
 
 			Self::write(key1, bottom.price, bottom);
@@ -85,15 +94,17 @@ where
 		})
 	}
 
-	pub fn write(key1: K1, key2: Option<K2>, item: LinkedItem<K1, K2>) {
+	pub fn write(key1: K1, key2: Option<K2>, item: LinkedItem<K1, K2, K3>) {
 		S::insert((key1, key2), item);
 	}
 
-	pub fn append(key1: K1, key2: K2, value: K1, otype: OrderType) {
+	pub fn append(key1: K1, key2: K2, value: K1, sell_amount: K3, buy_amount: K3, otype: OrderType) {
 		let item = S::get((key1, Some(key2)));
 		match item {
 			Some(mut item) => {
 				item.orders.push(value);
+				item.buy_amount = item.buy_amount + buy_amount;
+				item.sell_amount = item.sell_amount + sell_amount;
 				Self::write(key1, Some(key2), item);
 				return;
 			}
@@ -151,6 +162,8 @@ where
 				let item = LinkedItem {
 					prev: new_prev.price,
 					next: new_next.price,
+					buy_amount,
+					sell_amount,
 					orders: v,
 					price: Some(key2),
 				};
@@ -159,12 +172,19 @@ where
 		};
 	}
 
-	pub fn next_match_price(item: &LinkedItem<K1, K2>, otype: OrderType) -> Option<K2> {
+	pub fn next_match_price(item: &LinkedItem<K1, K2, K3>, otype: OrderType) -> Option<K2> {
 		if otype == OrderType::Buy {
 			item.prev
 		} else {
 			item.next
 		}
+	}
+
+	pub fn update_amount(key1: K1, key2: K2, sell_amount: K3, buy_amount: K3) {
+		let mut item = Self::read(key1, Some(key2));
+		item.buy_amount = item.buy_amount - buy_amount;
+		item.sell_amount = item.sell_amount - sell_amount;
+		Self::write(key1, Some(key2), item);
 	}
 
 	pub fn remove_all(key1: K1, otype: OrderType) {
@@ -193,7 +213,7 @@ where
 		}
 	}
 
-	pub fn remove_order(key1: K1, key2: K2, order_hash: K1) -> Result {
+	pub fn remove_order(key1: K1, key2: K2, order_hash: K1, sell_amount: K3, buy_amount: K3) -> Result {
 		match S::get((key1, Some(key2))) {
 			Some(mut item) => {
 				ensure!(
@@ -202,6 +222,8 @@ where
 				);
 
 				item.orders.retain(|&x| x != order_hash);
+				item.buy_amount = item.buy_amount - buy_amount;
+				item.sell_amount = item.sell_amount - sell_amount;
 				Self::write(key1, Some(key2), item.clone());
 
 				if item.orders.len() == 0 {

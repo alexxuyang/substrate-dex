@@ -148,8 +148,8 @@ impl<T> Trade<T> where T: Trait {
 	}
 }
 
-type OrderLinkedItem<T> = types::LinkedItem<<T as system::Trait>::Hash, <T as Trait>::Price>;
-type OrderLinkedItemList<T> = types::LinkedList<T, LinkedItemList<T>, <T as system::Trait>::Hash, <T as Trait>::Price>;
+type OrderLinkedItem<T> = types::LinkedItem<<T as system::Trait>::Hash, <T as Trait>::Price, <T as balances::Trait>::Balance>;
+type OrderLinkedItemList<T> = types::LinkedList<T, LinkedItemList<T>, <T as system::Trait>::Hash, <T as Trait>::Price, <T as balances::Trait>::Balance>;
 
 decl_storage! {
 	trait Store for Module<T: Trait> as TradeModule {
@@ -461,7 +461,7 @@ impl<T: Trait> Module<T> {
 			OrderType::Sell => op_token_hash = quote,
 		};
 
-		let order = LimitOrder::new(base, quote, sender.clone(), price, sell_amount, buy_amount, otype);
+		let mut order = LimitOrder::new(base, quote, sender.clone(), price, sell_amount, buy_amount, otype);
 		let hash  = order.hash;
 
 		<token::Module<T>>::ensure_free_balance(sender.clone(), op_token_hash, sell_amount)?;
@@ -479,18 +479,18 @@ impl<T: Trait> Module<T> {
 		TradePairOwnedOrdersIndex::<T>::insert(tp_hash, tp_owned_index + 1);
 
 		// order match
-		let filled = Self::order_match(tp_hash, order.clone())?;
+		let filled = Self::order_match(tp_hash, &mut order)?;
 
 		// add order to the market order list
 		if !filled {
-			<OrderLinkedItemList<T>>::append(tp_hash, price, hash, otype);
+			<OrderLinkedItemList<T>>::append(tp_hash, price, hash, order.remained_sell_amount, order.remained_buy_amount, otype);
 			Self::set_tp_buy_one_or_sell_one_price(tp_hash, otype)?;
 		}
 
 		Ok(())
 	}
 
-	fn order_match(tp_hash: T::Hash, mut order: LimitOrder<T>) -> result::Result<bool, &'static str> {
+	fn order_match(tp_hash: T::Hash, order: &mut LimitOrder<T>) -> result::Result<bool, &'static str> {
 		let mut head = <OrderLinkedItemList<T>>::read_head(tp_hash);
 
 		let end_item_price;
@@ -600,6 +600,9 @@ impl<T: Trait> Module<T> {
 
 				// save the trade pair market data
 				Self::set_tp_market_data(tp_hash, o.price, quote_qty)?;
+
+				// update maker order's amount in market
+				<OrderLinkedItemList<T>>::update_amount(tp_hash, o.price, have_qty, give_qty);
 
 				// remove the matched order
 				<OrderLinkedItemList<T>>::remove_all(tp_hash, !otype);
@@ -777,7 +780,7 @@ impl<T: Trait> Module<T> {
 
 		let tp_hash = Self::ensure_trade_pair(order.base, order.quote)?;
 
-		<OrderLinkedItemList<T>>::remove_order(tp_hash, order.price, order.hash)?;
+		<OrderLinkedItemList<T>>::remove_order(tp_hash, order.price, order.hash, order.sell_amount, order.buy_amount)?;
 
 		Self::deposit_event(RawEvent::OrderCanceled(sender, order.hash));
 
@@ -922,7 +925,8 @@ mod tests {
 				print!("Head ==> ");
 			}
 
-			print!("Price({:?}), Next({:?}), Prev({:?}), Orders({}): ", item.price, item.next, item.prev, item.orders.len());
+			print!("Price({:?}), Next({:?}), Prev({:?}), Sell_Amount({:?}), Buy_Amount({:?}), Orders({}): ", 
+				item.price, item.next, item.prev, item.sell_amount, item.buy_amount, item.orders.len());
 
 			let mut orders = item.orders.iter();
 			loop {
@@ -994,6 +998,8 @@ mod tests {
 				next: None,
 				price: min,
 				orders: Vec::new(),
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 
 			let top = OrderLinkedItem::<Test> {
@@ -1001,6 +1007,8 @@ mod tests {
 				next: min,
 				price: max,
 				orders: Vec::new(),
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 
 			let head = OrderLinkedItem::<Test> {
@@ -1008,16 +1016,21 @@ mod tests {
 				next: max,
 				price: None,
 				orders: Vec::new(),
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 
 			assert_eq!(head, <OrderLinkedItemList<Test>>::read_head(tp_hash));
 			assert_eq!(bottom, <OrderLinkedItemList<Test>>::read_bottom(tp_hash));
 			assert_eq!(top, <OrderLinkedItemList<Test>>::read_top(tp_hash));
 
-			// Bottom ==> Price(Some(0)), Next(None), Prev(Some(18446744073709551615)), Orders(0): 
-			// Head ==> Price(None), Next(Some(18446744073709551615)), Prev(Some(0)), Orders(0): 
-			// Top ==> Price(Some(18446744073709551615)), Next(Some(0)), Prev(None), Orders(0): 
+			// [Market Orders]
+			// Bottom ==> Price(Some(0)), Next(None), Prev(Some(340282366920938463463374607431768211455)), Sell_Amount(0), Buy_Amount(0), Orders(0):
+			// Head ==> Price(None), Next(Some(340282366920938463463374607431768211455)), Prev(Some(0)), Sell_Amount(0), Buy_Amount(0), Orders(0):
+			// Top ==> Price(Some(340282366920938463463374607431768211455)), Next(Some(0)), Prev(None), Sell_Amount(0), Buy_Amount(0), Orders(0):
 			// [Market Trades]
+			// [Trade Pair Data]
+			// buy one: None, sell one: None, latest matched price: None
 			output_order(tp_hash);
 
 			// sell limit order
@@ -1083,6 +1096,8 @@ mod tests {
 				prev: Some(40000000),
 				price: None,
 				orders: Vec::new(),
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read_head(tp_hash), item);
 
@@ -1098,6 +1113,8 @@ mod tests {
 				prev: None,
 				price: Some(50000000),
 				orders: v,
+				sell_amount: 10 + 20,
+				buy_amount: 15,
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
@@ -1112,6 +1129,8 @@ mod tests {
 				prev: Some(50000000),
 				price: Some(100000000),
 				orders: v,
+				sell_amount: 50,
+				buy_amount: 50,
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
@@ -1128,6 +1147,8 @@ mod tests {
 				prev: Some(100000000),
 				price: Some(120000000),
 				orders: v,
+				sell_amount: 60,
+				buy_amount: 72,
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
@@ -1142,6 +1163,8 @@ mod tests {
 				prev: Some(120000000),
 				price: Some(180000000),
 				orders: v,
+				sell_amount: 100,
+				buy_amount: 180,
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
@@ -1151,6 +1174,8 @@ mod tests {
 				prev: Some(180000000),
 				price: max,
 				orders: Vec::new(),
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read_top(tp_hash), item);
 
@@ -1160,6 +1185,8 @@ mod tests {
 				prev: max,
 				price: min,
 				orders: Vec::new(),
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read_bottom(tp_hash), item);
 
@@ -1174,6 +1201,8 @@ mod tests {
 				prev: min,
 				price: Some(10000000),
 				orders: v,
+				sell_amount: 12,
+				buy_amount: 120,
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
@@ -1189,6 +1218,8 @@ mod tests {
 				prev: Some(10000000),
 				price: Some(20000000),
 				orders: v,
+				sell_amount: 1000005,
+				buy_amount: 5000025,
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
@@ -1203,25 +1234,25 @@ mod tests {
 				prev: Some(20000000),
 				price: Some(40000000),
 				orders: v,
+				sell_amount: 100,
+				buy_amount: 250,
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
-			// remove sell orders
-			OrderLinkedItemList::<Test>::remove_all(tp_hash, OrderType::Sell);
-			OrderLinkedItemList::<Test>::remove_all(tp_hash, OrderType::Buy);
-
 			// [Market Orders]
-			// Bottom ==> Price(Some(0)), Next(Some(10000000)), Prev(Some(18446744073709551615)), Orders(0): 
-			// Price(Some(10000000)), Next(Some(20000000)), Prev(Some(0)), Orders(1): (0xcc83…6014@[Created]: Sell[12, 12], Buy[120, 120]), 
-			// Price(Some(20000000)), Next(Some(40000000)), Prev(Some(10000000)), Orders(2): (0xaaf7…d69c@[Created]: Sell[5, 5], Buy[25, 25]), (0xacd0…2c16@[Created]: Sell[1000000, 1000000], Buy[5000000, 5000000]), 
-			// Price(Some(40000000)), Next(None), Prev(Some(20000000)), Orders(1): (0xe873…85c6@[Created]: Sell[100, 100], Buy[250, 250]), 
-			// Head ==> Price(None), Next(Some(50000000)), Prev(Some(40000000)), Orders(0): 
-			// Price(Some(50000000)), Next(Some(100000000)), Prev(None), Orders(2): (0x4654…32af@[Created]: Sell[10, 10], Buy[5, 5]), (0x4354…4299@[Created]: Sell[20, 20], Buy[10, 10]), 
-			// Price(Some(100000000)), Next(Some(120000000)), Prev(Some(50000000)), Orders(1): (0x315b…c4dd@[Created]: Sell[50, 50], Buy[50, 50]), 
-			// Price(Some(120000000)), Next(Some(180000000)), Prev(Some(100000000)), Orders(3): (0x0652…61de@[Created]: Sell[10, 10], Buy[12, 12]), (0x4262…0178@[Created]: Sell[30, 30], Buy[36, 36]), (0x3d06…2344@[Created]: Sell[20, 20], Buy[24, 24]), 
-			// Price(Some(180000000)), Next(Some(18446744073709551615)), Prev(Some(120000000)), Orders(1): (0x92bd…d0ff@[Created]: Sell[100, 100], Buy[180, 180]), 
-			// Top ==> Price(Some(18446744073709551615)), Next(Some(0)), Prev(Some(180000000)), Orders(0): 
+			// Bottom ==> Price(Some(0)), Next(Some(10000000)), Prev(Some(340282366920938463463374607431768211455)), Sell_Amount(0), Buy_Amount(0), Orders(0):
+			// Price(Some(10000000)), Next(Some(20000000)), Prev(Some(0)), Sell_Amount(12), Buy_Amount(120), Orders(1): (0x3958…0b00@[Created]: Sell[12, 12], Buy[120, 120]),
+			// Price(Some(20000000)), Next(Some(40000000)), Prev(Some(10000000)), Sell_Amount(1000005), Buy_Amount(5000025), Orders(2): (0xfa29…43a7@[Created]: Sell[5, 5], Buy[25, 25]), (0xdc67…0657@[Created]: Sell[1000000, 1000000], Buy[5000000, 5000000]),
+			// Price(Some(40000000)), Next(None), Prev(Some(20000000)), Sell_Amount(100), Buy_Amount(250), Orders(1): (0xcb35…8889@[Created]: Sell[100, 100], Buy[250, 250]),
+			// Head ==> Price(None), Next(Some(50000000)), Prev(Some(40000000)), Sell_Amount(0), Buy_Amount(0), Orders(0):
+			// Price(Some(50000000)), Next(Some(100000000)), Prev(None), Sell_Amount(30), Buy_Amount(15), Orders(2): (0xa2df…a11b@[Created]: Sell[10, 10], Buy[5, 5]), (0x7cf2…7de9@[Created]: Sell[20, 20], Buy[10, 10]),
+			// Price(Some(100000000)), Next(Some(120000000)), Prev(Some(50000000)), Sell_Amount(50), Buy_Amount(50), Orders(1): (0x0053…0cf2@[Created]: Sell[50, 50], Buy[50, 50]),
+			// Price(Some(120000000)), Next(Some(180000000)), Prev(Some(100000000)), Sell_Amount(60), Buy_Amount(72), Orders(3): (0x84fc…0d6c@[Created]: Sell[10, 10], Buy[12, 12]), (0x4d63…b992@[Created]: Sell[30, 30], Buy[36, 36]), (0x6203…87ce@[Created]: Sell[20, 20], Buy[24, 24]),
+			// Price(Some(180000000)), Next(Some(340282366920938463463374607431768211455)), Prev(Some(120000000)), Sell_Amount(100), Buy_Amount(180), Orders(1): (0xa118…233c@[Created]: Sell[100, 100], Buy[180, 180]),
+			// Top ==> Price(Some(340282366920938463463374607431768211455)), Next(Some(0)), Prev(Some(180000000)), Sell_Amount(0), Buy_Amount(0), Orders(0):
 			// [Market Trades]
+			// [Trade Pair Data]
+			// buy one: Some(40000000), sell one: Some(50000000), latest matched price: None
 			output_order(tp_hash);
 
 			// price = 5
@@ -1253,6 +1284,8 @@ mod tests {
 				prev: Some(40000000),
 				price: None,
 				orders: Vec::new(),
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read_head(tp_hash), item);
 
@@ -1268,6 +1301,8 @@ mod tests {
 				prev: None,
 				price: Some(120000000),
 				orders: v,
+				sell_amount: 60,
+				buy_amount: 72,
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
@@ -1282,21 +1317,25 @@ mod tests {
 				prev: Some(120000000),
 				price: Some(180000000),
 				orders: v,
+				sell_amount: 100,
+				buy_amount: 180,
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
 			<OrderLinkedItemList<Test>>::remove_all(tp_hash, OrderType::Sell);
 
 			// [Market Orders]
-			// Bottom ==> Price(Some(0)), Next(Some(10000000)), Prev(Some(18446744073709551615)), Orders(0): 
-			// Price(Some(10000000)), Next(Some(20000000)), Prev(Some(0)), Orders(1): (0xcc83…6014@[Created]: Sell[12, 12], Buy[120, 120]), 
-			// Price(Some(20000000)), Next(Some(40000000)), Prev(Some(10000000)), Orders(2): (0xaaf7…d69c@[Created]: Sell[5, 5], Buy[25, 25]), (0xacd0…2c16@[Created]: Sell[1000000, 1000000], Buy[5000000, 5000000]), 
-			// Price(Some(40000000)), Next(None), Prev(Some(20000000)), Orders(1): (0xe873…85c6@[Created]: Sell[100, 100], Buy[250, 250]), 
-			// Head ==> Price(None), Next(Some(120000000)), Prev(Some(40000000)), Orders(0): 
-			// Price(Some(120000000)), Next(Some(180000000)), Prev(None), Orders(2): (0x4262…0178@[PartialFilled]: Sell[30, 29], Buy[36, 36]), (0x3d06…2344@[Created]: Sell[20, 20], Buy[24, 24]), 
-			// Price(Some(180000000)), Next(Some(18446744073709551615)), Prev(Some(120000000)), Orders(1): (0x92bd…d0ff@[Created]: Sell[100, 100], Buy[180, 180]), 
-			// Top ==> Price(Some(18446744073709551615)), Next(Some(0)), Prev(Some(180000000)), Orders(0): 
+			// Bottom ==> Price(Some(0)), Next(Some(10000000)), Prev(Some(340282366920938463463374607431768211455)), Sell_Amount(0), Buy_Amount(0), Orders(0):
+			// Price(Some(10000000)), Next(Some(20000000)), Prev(Some(0)), Sell_Amount(12), Buy_Amount(120), Orders(1): (0x3958…0b00@[Created]: Sell[12, 12], Buy[120, 120]),
+			// Price(Some(20000000)), Next(Some(40000000)), Prev(Some(10000000)), Sell_Amount(1000005), Buy_Amount(5000025), Orders(2): (0xfa29…43a7@[Created]: Sell[5, 5], Buy[25, 25]), (0xdc67…0657@[Created]: Sell[1000000, 1000000], Buy[5000000, 5000000]),
+			// Price(Some(40000000)), Next(None), Prev(Some(20000000)), Sell_Amount(100), Buy_Amount(250), Orders(1): (0xcb35…8889@[Created]: Sell[100, 100], Buy[250, 250]),
+			// Head ==> Price(None), Next(Some(120000000)), Prev(Some(40000000)), Sell_Amount(0), Buy_Amount(0), Orders(0):
+			// Price(Some(120000000)), Next(Some(180000000)), Prev(None), Sell_Amount(60), Buy_Amount(72), Orders(2): (0x4d63…b992@[PartialFilled]: Sell[30, 30], Buy[36, 35]), (0x6203…87ce@[Created]: Sell[20, 20], Buy[24, 24]),
+			// Price(Some(180000000)), Next(Some(340282366920938463463374607431768211455)), Prev(Some(120000000)), Sell_Amount(100), Buy_Amount(180), Orders(1): (0xa118…233c@[Created]: Sell[100, 100], Buy[180, 180]),
+			// Top ==> Price(Some(340282366920938463463374607431768211455)), Next(Some(0)), Prev(Some(180000000)), Sell_Amount(0), Buy_Amount(0), Orders(0):
 			// [Market Trades]
+			// [Trade Pair Data]
+			// buy one: Some(40000000), sell one: Some(50000000), latest matched price: None
 			output_order(tp_hash);
 
 			// price = 18
@@ -1320,17 +1359,21 @@ mod tests {
 				prev: Some(40000000),
 				price: None,
 				orders: Vec::new(),
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read_head(tp_hash), item);
 
 			// [Market Orders]
-			// Bottom ==> Price(Some(0)), Next(Some(10000000)), Prev(Some(18446744073709551615)), Orders(0): 
-			// Price(Some(10000000)), Next(Some(20000000)), Prev(Some(0)), Orders(1): (0xcc83…6014@[Created]: Sell[12, 12], Buy[120, 120]), 
-			// Price(Some(20000000)), Next(Some(40000000)), Prev(Some(10000000)), Orders(2): (0xaaf7…d69c@[Created]: Sell[5, 5], Buy[25, 25]), (0xacd0…2c16@[Created]: Sell[1000000, 1000000], Buy[5000000, 5000000]), 
-			// Price(Some(40000000)), Next(None), Prev(Some(20000000)), Orders(1): (0xe873…85c6@[Created]: Sell[100, 100], Buy[250, 250]), 
-			// Head ==> Price(None), Next(Some(18446744073709551615)), Prev(Some(40000000)), Orders(0): 
-			// Top ==> Price(Some(18446744073709551615)), Next(Some(0)), Prev(None), Orders(0): 
+			// Bottom ==> Price(Some(0)), Next(Some(10000000)), Prev(Some(340282366920938463463374607431768211455)), Sell_Amount(0), Buy_Amount(0), Orders(0):
+			// Price(Some(10000000)), Next(Some(20000000)), Prev(Some(0)), Sell_Amount(12), Buy_Amount(120), Orders(1): (0x3958…0b00@[Created]: Sell[12, 12], Buy[120, 120]),
+			// Price(Some(20000000)), Next(Some(40000000)), Prev(Some(10000000)), Sell_Amount(1000005), Buy_Amount(5000025), Orders(2): (0xfa29…43a7@[Created]: Sell[5, 5], Buy[25, 25]), (0xdc67…0657@[Created]: Sell[1000000, 1000000], Buy[5000000, 5000000]),
+			// Price(Some(40000000)), Next(None), Prev(Some(20000000)), Sell_Amount(100), Buy_Amount(250), Orders(1): (0xcb35…8889@[Created]: Sell[100, 100], Buy[250, 250]),
+			// Head ==> Price(None), Next(Some(340282366920938463463374607431768211455)), Prev(Some(40000000)), Sell_Amount(0), Buy_Amount(0), Orders(0):
+			// Top ==> Price(Some(340282366920938463463374607431768211455)), Next(Some(0)), Prev(None), Sell_Amount(0), Buy_Amount(0), Orders(0):
 			// [Market Trades]
+			// [Trade Pair Data]
+			// buy one: Some(40000000), sell one: Some(50000000), latest matched price: None
 			output_order(tp_hash);
 
 			// remove buy orders
@@ -1355,6 +1398,8 @@ mod tests {
 				prev: max,
 				price: min,
 				orders: Vec::new(),
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read_bottom(tp_hash), item);
 
@@ -1369,6 +1414,8 @@ mod tests {
 				prev: min,
 				price: Some(10000000),
 				orders: v,
+				sell_amount: 12,
+				buy_amount: 120,
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
@@ -1383,16 +1430,20 @@ mod tests {
 				prev: Some(10000000),
 				price: Some(20000000),
 				orders: v,
+				sell_amount: 1000005,
+				buy_amount: 5000025,
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
 			// [Market Orders]
-			// Bottom ==> Price(Some(0)), Next(Some(10000000)), Prev(Some(18446744073709551615)), Orders(0): 
-			// Price(Some(10000000)), Next(Some(20000000)), Prev(Some(0)), Orders(1): (0xcc83…6014@[Created]: Sell[12, 12], Buy[120, 120]), 
-			// Price(Some(20000000)), Next(None), Prev(Some(10000000)), Orders(1): (0xacd0…2c16@[PartialFilled]: Sell[1000000, 999900], Buy[5000000, 5000000]), 
-			// Head ==> Price(None), Next(Some(18446744073709551615)), Prev(Some(20000000)), Orders(0): 
-			// Top ==> Price(Some(18446744073709551615)), Next(Some(0)), Prev(None), Orders(0): 
+			// Bottom ==> Price(Some(0)), Next(Some(10000000)), Prev(Some(340282366920938463463374607431768211455)), Sell_Amount(0), Buy_Amount(0), Orders(0):
+			// Price(Some(10000000)), Next(Some(20000000)), Prev(Some(0)), Sell_Amount(12), Buy_Amount(120), Orders(1): (0x3958…0b00@[Created]: Sell[12, 12], Buy[120, 120]),
+			// Price(Some(20000000)), Next(None), Prev(Some(10000000)), Sell_Amount(1000005), Buy_Amount(5000025), Orders(1): (0xdc67…0657@[PartialFilled]: Sell[1000000, 1000000], Buy[5000000, 4999900]),
+			// Head ==> Price(None), Next(Some(340282366920938463463374607431768211455)), Prev(Some(20000000)), Sell_Amount(0), Buy_Amount(0), Orders(0):
+			// Top ==> Price(Some(340282366920938463463374607431768211455)), Next(Some(0)), Prev(None), Sell_Amount(0), Buy_Amount(0), Orders(0):
 			// [Market Trades]
+			// [Trade Pair Data]
+			// buy one: Some(40000000), sell one: Some(50000000), latest matched price: None
 			output_order(tp_hash);
 
 			// price = 2
@@ -1411,6 +1462,8 @@ mod tests {
 				next: None,
 				price: min,
 				orders: Vec::new(),
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 
 			let top = OrderLinkedItem::<Test> {
@@ -1418,6 +1471,8 @@ mod tests {
 				next: min,
 				price: max,
 				orders: Vec::new(),
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 
 			let head = OrderLinkedItem::<Test> {
@@ -1425,6 +1480,8 @@ mod tests {
 				next: max,
 				price: None,
 				orders: Vec::new(),
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 
 			assert_eq!(head, <OrderLinkedItemList<Test>>::read_head(tp_hash));
@@ -1432,16 +1489,18 @@ mod tests {
 			assert_eq!(top, <OrderLinkedItemList<Test>>::read_top(tp_hash));			
 
 			// [Market Orders]
-			// Bottom ==> Price(Some(0)), Next(None), Prev(Some(18446744073709551615)), Orders(0): 
-			// Head ==> Price(None), Next(Some(18446744073709551615)), Prev(Some(0)), Orders(0): 
-			// Top ==> Price(Some(18446744073709551615)), Next(Some(0)), Prev(None), Orders(0): 
+			// Bottom ==> Price(Some(0)), Next(None), Prev(Some(340282366920938463463374607431768211455)), Sell_Amount(0), Buy_Amount(0), Orders(0):
+			// Head ==> Price(None), Next(Some(340282366920938463463374607431768211455)), Prev(Some(0)), Sell_Amount(0), Buy_Amount(0), Orders(0):
+			// Top ==> Price(Some(340282366920938463463374607431768211455)), Next(Some(0)), Prev(None), Sell_Amount(0), Buy_Amount(0), Orders(0):
 			// [Market Trades]
+			// [Trade Pair Data]
+			// buy one: Some(40000000), sell one: Some(50000000), latest matched price: None
 			output_order(tp_hash);
 		});
 	}
 
 	#[test]
-	fn order_match_linked_list_test_case() {
+	fn order_match_test_case() {
 		with_externalities(&mut new_test_ext(), || {
 			let alice = 10;
 			let bob = 20;
@@ -1470,6 +1529,8 @@ mod tests {
 				next: None,
 				price: min,
 				orders: Vec::new(),
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 
 			let top = OrderLinkedItem::<Test> {
@@ -1477,6 +1538,8 @@ mod tests {
 				next: min,
 				price: max,
 				orders: Vec::new(),
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 
 			let head = OrderLinkedItem::<Test> {
@@ -1484,6 +1547,8 @@ mod tests {
 				next: max,
 				price: None,
 				orders: Vec::new(),
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 
 			assert_eq!(head, <OrderLinkedItemList<Test>>::read_head(tp_hash));
@@ -1491,10 +1556,12 @@ mod tests {
 			assert_eq!(top, <OrderLinkedItemList<Test>>::read_top(tp_hash));	
 
 			// [Market Orders]
-			// Bottom ==> Price(Some(0)), Next(None), Prev(Some(18446744073709551615)), Orders(0): 
-			// Head ==> Price(None), Next(Some(18446744073709551615)), Prev(Some(0)), Orders(0): 
-			// Top ==> Price(Some(18446744073709551615)), Next(Some(0)), Prev(None), Orders(0): 
+			// Bottom ==> Price(Some(0)), Next(None), Prev(Some(340282366920938463463374607431768211455)), Sell_Amount(0), Buy_Amount(0), Orders(0):
+			// Head ==> Price(None), Next(Some(340282366920938463463374607431768211455)), Prev(Some(0)), Sell_Amount(0), Buy_Amount(0), Orders(0):
+			// Top ==> Price(Some(340282366920938463463374607431768211455)), Next(Some(0)), Prev(None), Sell_Amount(0), Buy_Amount(0), Orders(0):
 			// [Market Trades]
+			// [Trade Pair Data]
+			// buy one: None, sell one: None, latest matched price: None
 			output_order(tp_hash);
 
 			let p: [u8; 8] = [10, 215, 163, 112, 61, 10, 199, 63]; // 18_000_000
@@ -1547,6 +1614,8 @@ mod tests {
 				prev: max,
 				price: min,
 				orders: Vec::new(),
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read_bottom(tp_hash), item);
 
@@ -1561,6 +1630,8 @@ mod tests {
 				prev: Some(0),
 				price: Some(6000000),
 				orders: v,
+				sell_amount: 24,
+				buy_amount: 400,
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
@@ -1574,6 +1645,8 @@ mod tests {
 				prev: Some(6000000),
 				price: None,
 				orders: v,
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
@@ -1588,6 +1661,8 @@ mod tests {
 				prev: None,
 				price: Some(10000000),
 				orders: v,
+				sell_amount: 10,
+				buy_amount: 1,
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
@@ -1603,6 +1678,8 @@ mod tests {
 				prev: Some(10000000),
 				price: Some(11000000),
 				orders: v,
+				sell_amount: 10100,
+				buy_amount: 1111,
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
@@ -1617,6 +1694,8 @@ mod tests {
 				prev: Some(11000000),
 				price: Some(18000000),
 				orders: v,
+				sell_amount: 200,
+				buy_amount: 36,
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
@@ -1626,19 +1705,22 @@ mod tests {
 				prev: Some(18000000),
 				price: max,
 				orders: Vec::new(),
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read_top(tp_hash), item);
 
-
 			// [Market Orders]
-			// Bottom ==> Price(Some(0)), Next(Some(6000000)), Prev(Some(18446744073709551615)), Orders(0): 
-			// Price(Some(6000000)), Next(None), Prev(Some(0)), Orders(1): (0x39ea…f183@[Created]: Sell[24, 24], Buy[400, 400]), 
-			// Head ==> Price(None), Next(Some(10000000)), Prev(Some(6000000)), Orders(0): 
-			// Price(Some(10000000)), Next(Some(11000000)), Prev(None), Orders(1): (0x2491…b0ff@[Created]: Sell[10, 10], Buy[1, 1]), 
-			// Price(Some(11000000)), Next(Some(18000000)), Prev(Some(10000000)), Orders(2): (0xdf61…f22c@[Created]: Sell[100, 100], Buy[11, 11]), (0xe7d6…07ae@[Created]: Sell[10000, 10000], Buy[1100, 1100]), 
-			// Price(Some(18000000)), Next(Some(18446744073709551615)), Prev(Some(11000000)), Orders(1): (0xe7da…ee16@[Created]: Sell[200, 200], Buy[36, 36]), 
-			// Top ==> Price(Some(18446744073709551615)), Next(Some(0)), Prev(Some(18000000)), Orders(0): 
+			// Bottom ==> Price(Some(0)), Next(Some(6000000)), Prev(Some(340282366920938463463374607431768211455)), Sell_Amount(0), Buy_Amount(0), Orders(0):
+			// Price(Some(6000000)), Next(None), Prev(Some(0)), Sell_Amount(24), Buy_Amount(400), Orders(1): (0x5240…b6d0@[Created]: Sell[24, 24], Buy[400, 400]),
+			// Head ==> Price(None), Next(Some(10000000)), Prev(Some(6000000)), Sell_Amount(0), Buy_Amount(0), Orders(0):
+			// Price(Some(10000000)), Next(Some(11000000)), Prev(None), Sell_Amount(10), Buy_Amount(1), Orders(1): (0x26d8…e90f@[Created]: Sell[10, 10], Buy[1, 1]),
+			// Price(Some(11000000)), Next(Some(18000000)), Prev(Some(10000000)), Sell_Amount(10100), Buy_Amount(1111), Orders(2): (0x5983…7090@[Created]: Sell[100, 100], Buy[11, 11]), (0x0e9b…125e@[Created]: Sell[10000, 10000], Buy[1100, 1100]),
+			// Price(Some(18000000)), Next(Some(340282366920938463463374607431768211455)), Prev(Some(11000000)), Sell_Amount(200), Buy_Amount(36), Orders(1): (0xdc46…ffce@[Created]: Sell[200, 200], Buy[36, 36]),
+			// Top ==> Price(Some(340282366920938463463374607431768211455)), Next(Some(0)), Prev(Some(18000000)), Sell_Amount(0), Buy_Amount(0), Orders(0):
 			// [Market Trades]
+			// [Trade Pair Data]
+			// buy one: Some(6000000), sell one: Some(10000000), latest matched price: None
 			output_order(tp_hash);
 	
 			assert_ok!(TradeModule::create_limit_order(Origin::signed(alice), base, quote, OrderType::Buy, 11_000_000, 55));
@@ -1678,6 +1760,8 @@ mod tests {
 				prev: max,
 				price: min,
 				orders: Vec::new(),
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read_bottom(tp_hash), item);
 
@@ -1692,6 +1776,8 @@ mod tests {
 				prev: Some(0),
 				price: Some(6000000),
 				orders: v,
+				sell_amount: 24,
+				buy_amount: 400,
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
@@ -1705,6 +1791,8 @@ mod tests {
 				prev: Some(6000000),
 				price: None,
 				orders: v,
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
@@ -1719,6 +1807,8 @@ mod tests {
 				prev: None,
 				price: Some(11000000),
 				orders: v,
+				sell_amount: 9610,
+				buy_amount: 1057,
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
@@ -1733,6 +1823,8 @@ mod tests {
 				prev: Some(11000000),
 				price: Some(18000000),
 				orders: v,
+				sell_amount: 200,
+				buy_amount: 36,
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
@@ -1742,6 +1834,8 @@ mod tests {
 				prev: Some(18000000),
 				price: max,
 				orders: Vec::new(),
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read_top(tp_hash), item);
 
@@ -1835,16 +1929,18 @@ mod tests {
 			assert_eq!(tp.latest_matched_price, Some(11000000));
 
 			// [Market Orders]
-			// Bottom ==> Price(Some(0)), Next(Some(6000000)), Prev(Some(18446744073709551615)), Orders(0): 
-			// Price(Some(6000000)), Next(None), Prev(Some(0)), Orders(1): (0x39ea…f183@[Created]: Sell[24, 24], Buy[400, 400]), 
-			// Head ==> Price(None), Next(Some(11000000)), Prev(Some(6000000)), Orders(0): 
-			// Price(Some(11000000)), Next(Some(18000000)), Prev(None), Orders(1): (0xe7d6…07ae@[PartialFilled]: Sell[10000, 9610], Buy[1100, 1057]), 
-			// Price(Some(18000000)), Next(Some(18446744073709551615)), Prev(Some(11000000)), Orders(1): (0xe7da…ee16@[Created]: Sell[200, 200], Buy[36, 36]), 
-			// Top ==> Price(Some(18446744073709551615)), Next(Some(0)), Prev(Some(18000000)), Orders(0): 
+			// Bottom ==> Price(Some(0)), Next(Some(6000000)), Prev(Some(340282366920938463463374607431768211455)), Sell_Amount(0), Buy_Amount(0), Orders(0):
+			// Price(Some(6000000)), Next(None), Prev(Some(0)), Sell_Amount(24), Buy_Amount(400), Orders(1): (0x5240…b6d0@[Created]: Sell[24, 24], Buy[400, 400]),
+			// Head ==> Price(None), Next(Some(11000000)), Prev(Some(6000000)), Sell_Amount(0), Buy_Amount(0), Orders(0):
+			// Price(Some(11000000)), Next(Some(18000000)), Prev(None), Sell_Amount(9610), Buy_Amount(1057), Orders(1): (0x0e9b…125e@[PartialFilled]: Sell[10000, 9610], Buy[1100, 1057]),
+			// Price(Some(18000000)), Next(Some(340282366920938463463374607431768211455)), Prev(Some(11000000)), Sell_Amount(200), Buy_Amount(36), Orders(1): (0xdc46…ffce@[Created]: Sell[200, 200], Buy[36, 36]),
+			// Top ==> Price(Some(340282366920938463463374607431768211455)), Next(Some(0)), Prev(Some(18000000)), Sell_Amount(0), Buy_Amount(0), Orders(0):
 			// [Market Trades]
-			// [0x72bb…80c0/0x8a33…f642] - 0x3fdf…4371@10000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][1, 10]
-			// [0x72bb…80c0/0x8a33…f642] - 0xad18…fab8@11000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][11, 100]
-			// [0x72bb…80c0/0x8a33…f642] - 0x1f02…44c7@11000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][43, 390]
+			// [0x72bb…80c0/0x8a33…f642] - 0xab39…3add@10000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][1, 10]
+			// [0x72bb…80c0/0x8a33…f642] - 0x6b55…2d58@11000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][11, 100]
+			// [0x72bb…80c0/0x8a33…f642] - 0xa55c…cd59@11000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][43, 390]
+			// [Trade Pair Data]
+			// buy one: Some(6000000), sell one: Some(11000000), latest matched price: Some(11000000)
 			output_order(tp_hash);
 
 			assert_ok!(TradeModule::create_limit_order(Origin::signed(alice), base, quote, OrderType::Buy, 18_000_000, 13212));
@@ -1876,6 +1972,8 @@ mod tests {
 				prev: max,
 				price: min,
 				orders: Vec::new(),
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read_bottom(tp_hash), item);
 
@@ -1890,6 +1988,8 @@ mod tests {
 				prev: Some(0),
 				price: Some(6000000),
 				orders: v,
+				sell_amount: 24,
+				buy_amount: 400,
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
@@ -1904,6 +2004,8 @@ mod tests {
 				prev: Some(6000000),
 				price: Some(18000000),
 				orders: v,
+				sell_amount: 13212 - 1057 - 36,
+				buy_amount: 73400 - 9610 - 200,
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
@@ -1917,6 +2019,8 @@ mod tests {
 				prev: Some(18000000),
 				price: None,
 				orders: v,
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
@@ -1926,6 +2030,8 @@ mod tests {
 				prev: None,
 				price: max,
 				orders: Vec::new(),
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read_top(tp_hash), item);
 
@@ -2053,17 +2159,19 @@ mod tests {
 			assert_eq!(tp.latest_matched_price, Some(18000000));
 
 			// [Market Orders]
-			// Bottom ==> Price(Some(0)), Next(Some(6000000)), Prev(Some(18446744073709551615)), Orders(0): 
-			// Price(Some(6000000)), Next(Some(18000000)), Prev(Some(0)), Orders(1): (0x39ea…f183@[Created]: Sell[24, 24], Buy[400, 400]), 
-			// Price(Some(18000000)), Next(None), Prev(Some(6000000)), Orders(1): (0x78ae…6f02@[PartialFilled]: Sell[13212, 12119], Buy[73400, 63590]), 
-			// Head ==> Price(None), Next(Some(18446744073709551615)), Prev(Some(18000000)), Orders(0): 
-			// Top ==> Price(Some(18446744073709551615)), Next(Some(0)), Prev(None), Orders(0): 
+			// Bottom ==> Price(Some(0)), Next(Some(6000000)), Prev(Some(340282366920938463463374607431768211455)), Sell_Amount(0), Buy_Amount(0), Orders(0):
+			// Price(Some(6000000)), Next(Some(18000000)), Prev(Some(0)), Sell_Amount(24), Buy_Amount(400), Orders(1): (0x5240…b6d0@[Created]: Sell[24, 24], Buy[400, 400]),
+			// Price(Some(18000000)), Next(None), Prev(Some(6000000)), Sell_Amount(12119), Buy_Amount(63590), Orders(1): (0x77e2…c008@[PartialFilled]: Sell[13212, 12119], Buy[73400, 63590]),
+			// Head ==> Price(None), Next(Some(340282366920938463463374607431768211455)), Prev(Some(18000000)), Sell_Amount(0), Buy_Amount(0), Orders(0):
+			// Top ==> Price(Some(340282366920938463463374607431768211455)), Next(Some(0)), Prev(None), Sell_Amount(0), Buy_Amount(0), Orders(0):
 			// [Market Trades]
-			// [0x72bb…80c0/0x8a33…f642] - 0x3fdf…4371@10000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][1, 10]
-			// [0x72bb…80c0/0x8a33…f642] - 0xad18…fab8@11000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][11, 100]
-			// [0x72bb…80c0/0x8a33…f642] - 0x1f02…44c7@11000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][43, 390]
-			// [0x72bb…80c0/0x8a33…f642] - 0x7794…d2a9@11000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][1057, 9610]
-			// [0x72bb…80c0/0x8a33…f642] - 0x5759…febf@18000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][36, 200]
+			// [0x72bb…80c0/0x8a33…f642] - 0xab39…3add@10000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][1, 10]
+			// [0x72bb…80c0/0x8a33…f642] - 0x6b55…2d58@11000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][11, 100]
+			// [0x72bb…80c0/0x8a33…f642] - 0xa55c…cd59@11000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][43, 390]
+			// [0x72bb…80c0/0x8a33…f642] - 0xb833…a1e0@11000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][1057, 9610]
+			// [0x72bb…80c0/0x8a33…f642] - 0x278b…4ea6@18000000[Buy]: [Buyer,Seller][10,20], [Maker,Taker][20,10], [Base,Quote][36, 200]
+			// [Trade Pair Data]
+			// buy one: Some(18000000), sell one: None, latest matched price: Some(18000000)
 			output_order(tp_hash);
 		});
 	}
@@ -2098,6 +2206,8 @@ mod tests {
 				next: None,
 				price: min,
 				orders: Vec::new(),
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 
 			let top = OrderLinkedItem::<Test> {
@@ -2105,6 +2215,8 @@ mod tests {
 				next: min,
 				price: max,
 				orders: Vec::new(),
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 
 			let head = OrderLinkedItem::<Test> {
@@ -2112,6 +2224,8 @@ mod tests {
 				next: max,
 				price: None,
 				orders: Vec::new(),
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 
 			assert_eq!(head, <OrderLinkedItemList<Test>>::read_head(tp_hash));
@@ -2119,10 +2233,12 @@ mod tests {
 			assert_eq!(top, <OrderLinkedItemList<Test>>::read_top(tp_hash));	
 
 			// [Market Orders]
-			// Bottom ==> Price(Some(0)), Next(None), Prev(Some(18446744073709551615)), Orders(0): 
-			// Head ==> Price(None), Next(Some(18446744073709551615)), Prev(Some(0)), Orders(0): 
-			// Top ==> Price(Some(18446744073709551615)), Next(Some(0)), Prev(None), Orders(0): 
+			// Bottom ==> Price(Some(0)), Next(None), Prev(Some(340282366920938463463374607431768211455)), Sell_Amount(0), Buy_Amount(0), Orders(0):
+			// Head ==> Price(None), Next(Some(340282366920938463463374607431768211455)), Prev(Some(0)), Sell_Amount(0), Buy_Amount(0), Orders(0):
+			// Top ==> Price(Some(340282366920938463463374607431768211455)), Next(Some(0)), Prev(None), Sell_Amount(0), Buy_Amount(0), Orders(0):
 			// [Market Trades]
+			// [Trade Pair Data]
+			// buy one: None, sell one: None, latest matched price: None
 			output_order(tp_hash);
 
 			assert_ok!(TradeModule::create_limit_order(Origin::signed(bob), base, quote, OrderType::Sell, 18_000_000, 200));
@@ -2171,6 +2287,8 @@ mod tests {
 				prev: max,
 				price: min,
 				orders: Vec::new(),
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read_bottom(tp_hash), item);
 
@@ -2185,6 +2303,8 @@ mod tests {
 				prev: Some(0),
 				price: Some(6000000),
 				orders: v,
+				sell_amount: 24,
+				buy_amount: 400,
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
@@ -2198,6 +2318,8 @@ mod tests {
 				prev: Some(6000000),
 				price: None,
 				orders: v,
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
@@ -2212,6 +2334,8 @@ mod tests {
 				prev: None,
 				price: Some(10000000),
 				orders: v,
+				sell_amount: 10,
+				buy_amount: 1,
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
@@ -2227,6 +2351,8 @@ mod tests {
 				prev: Some(10000000),
 				price: Some(11000000),
 				orders: v,
+				sell_amount: 10100,
+				buy_amount: 1111,
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
@@ -2241,6 +2367,8 @@ mod tests {
 				prev: Some(11000000),
 				price: Some(18000000),
 				orders: v,
+				sell_amount: 200,
+				buy_amount: 36,
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
@@ -2250,19 +2378,22 @@ mod tests {
 				prev: Some(18000000),
 				price: max,
 				orders: Vec::new(),
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read_top(tp_hash), item);
 
-
 			// [Market Orders]
-			// Bottom ==> Price(Some(0)), Next(Some(6000000)), Prev(Some(18446744073709551615)), Orders(0): 
-			// Price(Some(6000000)), Next(None), Prev(Some(0)), Orders(1): (0x39ea…f183@[Created]: Sell[24, 24], Buy[400, 400]), 
-			// Head ==> Price(None), Next(Some(10000000)), Prev(Some(6000000)), Orders(0): 
-			// Price(Some(10000000)), Next(Some(11000000)), Prev(None), Orders(1): (0x2491…b0ff@[Created]: Sell[10, 10], Buy[1, 1]), 
-			// Price(Some(11000000)), Next(Some(18000000)), Prev(Some(10000000)), Orders(2): (0xdf61…f22c@[Created]: Sell[100, 100], Buy[11, 11]), (0xe7d6…07ae@[Created]: Sell[10000, 10000], Buy[1100, 1100]), 
-			// Price(Some(18000000)), Next(Some(18446744073709551615)), Prev(Some(11000000)), Orders(1): (0xe7da…ee16@[Created]: Sell[200, 200], Buy[36, 36]), 
-			// Top ==> Price(Some(18446744073709551615)), Next(Some(0)), Prev(Some(18000000)), Orders(0): 
+			// Bottom ==> Price(Some(0)), Next(Some(6000000)), Prev(Some(340282366920938463463374607431768211455)), Sell_Amount(0), Buy_Amount(0), Orders(0):
+			// Price(Some(6000000)), Next(None), Prev(Some(0)), Sell_Amount(24), Buy_Amount(400), Orders(1): (0x5240…b6d0@[Created]: Sell[24, 24], Buy[400, 400]),
+			// Head ==> Price(None), Next(Some(10000000)), Prev(Some(6000000)), Sell_Amount(0), Buy_Amount(0), Orders(0):
+			// Price(Some(10000000)), Next(Some(11000000)), Prev(None), Sell_Amount(10), Buy_Amount(1), Orders(1): (0x26d8…e90f@[Created]: Sell[10, 10], Buy[1, 1]),
+			// Price(Some(11000000)), Next(Some(18000000)), Prev(Some(10000000)), Sell_Amount(10100), Buy_Amount(1111), Orders(2): (0x5983…7090@[Created]: Sell[100, 100], Buy[11, 11]), (0x0e9b…125e@[Created]: Sell[10000, 10000], Buy[1100, 1100]),
+			// Price(Some(18000000)), Next(Some(340282366920938463463374607431768211455)), Prev(Some(11000000)), Sell_Amount(200), Buy_Amount(36), Orders(1): (0xdc46…ffce@[Created]: Sell[200, 200], Buy[36, 36]),
+			// Top ==> Price(Some(340282366920938463463374607431768211455)), Next(Some(0)), Prev(Some(18000000)), Sell_Amount(0), Buy_Amount(0), Orders(0):
 			// [Market Trades]
+			// [Trade Pair Data]
+			// buy one: Some(6000000), sell one: Some(10000000), latest matched price: None
 			output_order(tp_hash);
 	
 			order101.status = OrderStatus::Filled;
@@ -2292,6 +2423,8 @@ mod tests {
 				prev: max,
 				price: min,
 				orders: Vec::new(),
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read_bottom(tp_hash), item);
 
@@ -2305,6 +2438,8 @@ mod tests {
 				prev: Some(0),
 				price: None,
 				orders: v,
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
@@ -2319,6 +2454,8 @@ mod tests {
 				prev: None,
 				price: Some(10000000),
 				orders: v,
+				sell_amount: 10,
+				buy_amount: 1,
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
@@ -2333,6 +2470,8 @@ mod tests {
 				prev: Some(10000000),
 				price: Some(18000000),
 				orders: v,
+				sell_amount: 200,
+				buy_amount: 36,
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
@@ -2346,22 +2485,26 @@ mod tests {
 				prev: Some(18000000),
 				price: max,
 				orders: v,
+				sell_amount: Default::default(),
+				buy_amount: Default::default(),
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read(tp_hash, curr), item);
 
 			// [Market Orders]
-			// Bottom ==> Price(Some(0)), Next(None), Prev(Some(18446744073709551615)), Orders(0): 
-			// Head ==> Price(None), Next(Some(10000000)), Prev(Some(0)), Orders(0): 
-			// Price(Some(10000000)), Next(Some(18000000)), Prev(None), Orders(1): (0x2491…b0ff@[Created]: Sell[10, 10], Buy[1, 1]), 
-			// Price(Some(18000000)), Next(Some(18446744073709551615)), Prev(Some(10000000)), Orders(1): (0xe7da…ee16@[Created]: Sell[200, 200], Buy[36, 36]), 
-			// Top ==> Price(Some(18446744073709551615)), Next(Some(0)), Prev(Some(18000000)), Orders(0): 
+			// Bottom ==> Price(Some(0)), Next(None), Prev(Some(340282366920938463463374607431768211455)), Sell_Amount(0), Buy_Amount(0), Orders(0):
+			// Head ==> Price(None), Next(Some(10000000)), Prev(Some(0)), Sell_Amount(0), Buy_Amount(0), Orders(0):
+			// Price(Some(10000000)), Next(Some(18000000)), Prev(None), Sell_Amount(10), Buy_Amount(1), Orders(1): (0x26d8…e90f@[Created]: Sell[10, 10], Buy[1, 1]),
+			// Price(Some(18000000)), Next(Some(340282366920938463463374607431768211455)), Prev(Some(10000000)), Sell_Amount(200), Buy_Amount(36), Orders(1): (0xdc46…ffce@[Created]: Sell[200, 200], Buy[36, 36]),
+			// Top ==> Price(Some(340282366920938463463374607431768211455)), Next(Some(0)), Prev(Some(18000000)), Sell_Amount(0), Buy_Amount(0), Orders(0):
 			// [Market Trades]
+			// [Trade Pair Data]
+			// buy one: Some(6000000), sell one: Some(10000000), latest matched price: None
 			output_order(tp_hash);
 		});
 	}
 
 	#[test]
-	fn order_match_test_case() {
+	fn order_match_calculation_test_case() {
 		with_externalities(&mut new_test_ext(), || {
 			let alice = 10;
 			let bob = 20;
@@ -2534,22 +2677,22 @@ mod tests {
 		with_externalities(&mut new_test_ext(), || {
 			assert_eq!(1, 1);
 
-			let price_v1 = 3.11122233f64;
+			let _price_v1 = 3.11122233f64;
 			let price_v1_vec_u8: [u8; 8] = [183, 122, 111, 136, 200, 227, 8, 64];
 			let price_v2 = 311122233u128;
 			assert_ok!(TradeModule::price_as_vec_u8_to_x_by_100m(price_v1_vec_u8.to_vec()), price_v2);
 
-			let price_v1 = 123.00000000f64;
+			let _price_v1 = 123.00000000f64;
 			let price_v1_vec_u8: [u8; 8] = [0, 0, 0, 0, 0, 192, 94, 64];
 			let price_v2 = 12_300_000_000;
 			assert_ok!(TradeModule::price_as_vec_u8_to_x_by_100m(price_v1_vec_u8.to_vec()), price_v2);
 
-			let price_v1 = 999.6789f64;
+			let _price_v1 = 999.6789f64;
 			let price_v1_vec_u8: [u8; 8] = [9, 138, 31, 99, 110, 61, 143, 64];
 			let price_v2 = 99_967_890_000u128;
 			assert_ok!(TradeModule::price_as_vec_u8_to_x_by_100m(price_v1_vec_u8.to_vec()), price_v2);
 
-			let price_v1 = 0.00000001f64;
+			let _price_v1 = 0.00000001f64;
 			let price_v1_vec_u8: [u8; 8] = [58, 140, 48, 226, 142, 121, 69, 62];
 			let price_v2 = 1u128;
 			assert_ok!(TradeModule::price_as_vec_u8_to_x_by_100m(price_v1_vec_u8.to_vec()), price_v2);
@@ -2558,12 +2701,12 @@ mod tests {
 			assert_err!(TradeModule::price_as_vec_u8_to_x_by_100m(price_v1_vec_u8.to_vec()), 
 				"price length is less than 8");
 
-			let price_v1 = 3.111222333f64;
+			let _price_v1 = 3.111222333f64;
 			let price_v1_vec_u8: [u8; 8] = [255, 142, 214, 136, 200, 227, 8, 64];
 			assert_err!(TradeModule::price_as_vec_u8_to_x_by_100m(price_v1_vec_u8.to_vec()), 
 				"price have more digits than required");
 
-			let price_v1 = 3.000011112222f64;
+			let _price_v1 = 3.000011112222f64;
 			let price_v1_vec_u8: [u8; 8] = [101, 10, 117, 211, 5, 0, 8, 64];
 			assert_err!(TradeModule::price_as_vec_u8_to_x_by_100m(price_v1_vec_u8.to_vec()), 
 				"price have more digits than required");
