@@ -50,13 +50,24 @@ impl Alternative {
 				"dev",
 				|| {
 					testnet_genesis(
-						vec![get_authority_keys_from_seed("Alice")],
+						vec![
+							get_authority_keys_from_seed("Alice"),
+							get_authority_keys_from_seed("Bob"),
+						],
 						get_from_seed::<AccountId>("Alice"),
 						vec![
 							get_from_seed::<AccountId>("Alice"),
 							get_from_seed::<AccountId>("Bob"),
+							get_from_seed::<AccountId>("Charlie"),
+							get_from_seed::<AccountId>("Dave"),
+							get_from_seed::<AccountId>("Eve"),
+							get_from_seed::<AccountId>("Ferdie"),
 							get_from_seed::<AccountId>("Alice//stash"),
 							get_from_seed::<AccountId>("Bob//stash"),
+							get_from_seed::<AccountId>("Charlie//stash"),
+							get_from_seed::<AccountId>("Dave//stash"),
+							get_from_seed::<AccountId>("Eve//stash"),
+							get_from_seed::<AccountId>("Ferdie//stash"),
 						],
 						true,
 					)
