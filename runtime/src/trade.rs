@@ -22,8 +22,6 @@ pub struct TradePair<T> where T: Trait {
 	base: T::Hash,
 	quote: T::Hash,
 
-	buy_one_price: Option<T::Price>,
-	sell_one_price: Option<T::Price>,
 	latest_matched_price: Option<T::Price>,
 	
 	one_day_trade_volume: T::Balance, // sum of quote qty
@@ -201,7 +199,7 @@ decl_storage! {
 
 		/// (TradePairHash, BlockNumber) => (Sum_of_Trade_Volume, Highest_Price, Lowest_Price)
 		TPTradeDataBucket get(trade_pair_trade_data_bucket): map (T::Hash, T::BlockNumber) => (T::Balance, Option<T::Price>, Option<T::Price>);
-		TPTradePriceBucket get(trade_pair_trade_price_bucket): map (T::Hash) => (Vec<T::Price>, Vec<T::Price>);
+		TPTradePriceBucket get(trade_pair_trade_price_bucket): map (T::Hash) => (Vec<Option<T::Price>>, Vec<Option<T::Price>>);
 
 		Nonce: u64;
 	}
@@ -300,7 +298,7 @@ decl_module! {
 			for index in 0 .. TradePairsIndex::get() {
 				let tp_hash = TradePairsHashByIndex::<T>::get(index).unwrap();
 				let mut tp = TradePairs::<T>::get(tp_hash).unwrap();
-				let amount = TPTradeDataBucket::<T>::get((tp_hash, block_number - days));
+				let (amount, _, _) = TPTradeDataBucket::<T>::get((tp_hash, block_number - days));
 				tp.one_day_trade_volume = tp.one_day_trade_volume - amount;
 				TradePairs::<T>::insert(tp_hash, tp);
 			}
@@ -310,7 +308,7 @@ decl_module! {
 			for index in 0 .. TradePairsIndex::get() {
 				let tp_hash = TradePairsHashByIndex::<T>::get(index).unwrap();
 				let mut tp = TradePairs::<T>::get(tp_hash).unwrap();
-				let amount = TPTradeDataBucket::<T>::get((tp_hash, block_number));
+				let (amount, _, _) = TPTradeDataBucket::<T>::get((tp_hash, block_number));
 				tp.one_day_trade_volume = tp.one_day_trade_volume + amount;
 				TradePairs::<T>::insert(tp_hash, tp);
 			}
@@ -411,8 +409,6 @@ impl<T: Trait> Module<T> {
 
 		let tp = TradePair {
 			hash, base, quote,
-			buy_one_price: None,
-			sell_one_price: None,
 			latest_matched_price: None,
 			one_day_trade_volume: Default::default(),
 			one_day_highest_price: None,
@@ -469,7 +465,6 @@ impl<T: Trait> Module<T> {
 		// add order to the market order list
 		if !filled {
 			<OrderLinkedItemList<T>>::append(tp_hash, price, hash, order.remained_sell_amount, order.remained_buy_amount, otype);
-			Self::set_tp_buy_one_or_sell_one_price(tp_hash, otype)?;
 		}
 
 		Ok(())
@@ -592,9 +587,6 @@ impl<T: Trait> Module<T> {
 				// remove the matched order
 				<OrderLinkedItemList<T>>::remove_all(tp_hash, !otype);
 
-				// set trade pair buy/sell price after a match
-				Self::set_tp_buy_one_or_sell_one_price(tp_hash, !order.otype)?;
-
 				// save the trade data
 				let trade = Trade::new(tp.base, tp.quote, &o, &order, base_qty, quote_qty);
 				Trades::insert(trade.hash, trade.clone());
@@ -694,33 +686,6 @@ impl<T: Trait> Module<T> {
 		}
 	}
 
-	pub fn set_tp_buy_one_or_sell_one_price(tp_hash: T::Hash, otype: OrderType) -> Result {
-
-		let mut tp = <TradePairs<T>>::get(tp_hash).ok_or("can not get trade pair")?;
-
-		let head = <OrderLinkedItemList<T>>::read_head(tp_hash);
-
-		if otype == OrderType::Buy {
-			if head.prev == Some(T::Price::min_value()) {
-				tp.buy_one_price = None;
-			} else {
-				tp.buy_one_price = head.prev;
-			}
-		}
-
-		if otype == OrderType::Sell {
-			if head.next == Some(T::Price::max_value()) {
-				tp.sell_one_price = None;
-			} else {
-				tp.sell_one_price = head.next;
-			}
-		}
-
-		<TradePairs<T>>::insert(tp_hash, tp);
-
-		Ok(())
-	}
-
 	pub fn set_tp_market_data(tp_hash: T::Hash, price: T::Price, amount: T::Balance) -> Result {
 
 		let mut tp = <TradePairs<T>>::get(tp_hash).ok_or("can not get trade pair")?;
@@ -749,7 +714,9 @@ impl<T: Trait> Module<T> {
 			},
 		}
 
-		<TPTradeDataBucket<T>>::mutate((tp_hash, <system::Module<T>>::block_number()), |x| *x += amount);
+		let mut bucket = <TPTradeDataBucket<T>>::get((tp_hash, <system::Module<T>>::block_number()));
+		bucket.0 = bucket.0 + amount;
+		<TPTradeDataBucket<T>>::insert((tp_hash, <system::Module<T>>::block_number()), bucket);
 
 		<TradePairs<T>>::insert(tp_hash, tp);
 
@@ -962,7 +929,7 @@ mod tests {
 
 		println!("[Trade Pair Data]");
 		let tp = TradeModule::trade_pair(tp_hash).unwrap();
-		println!("buy one: {:?}, sell one: {:?}, latest matched price: {:?}", tp.buy_one_price, tp.sell_one_price, tp.latest_matched_price);
+		println!("latest matched price: {:?}", tp.latest_matched_price);
 
 		println!();
 	}
@@ -1918,8 +1885,6 @@ mod tests {
 			assert_eq!(TokenModule::balance_of((bob, base)), 55);
 
 			let tp = TradeModule::trade_pair(tp_hash).unwrap();
-			assert_eq!(tp.buy_one_price, Some(6000000));
-			assert_eq!(tp.sell_one_price, Some(11000000));
 			assert_eq!(tp.latest_matched_price, Some(11000000));
 
 			// [Market Orders]
@@ -2155,8 +2120,6 @@ mod tests {
 			assert_eq!(TokenModule::balance_of((bob, base)), 1 + 11 + 1100 + 36);
 
 			let tp = TradeModule::trade_pair(tp_hash).unwrap();
-			assert_eq!(tp.buy_one_price, Some(18000000));
-			assert_eq!(tp.sell_one_price, None);
 			assert_eq!(tp.latest_matched_price, Some(18000000));
 
 			// [Market Orders]
