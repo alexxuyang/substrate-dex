@@ -757,7 +757,7 @@ impl<T: Trait> Module<T> {
 	}
 
 	fn do_cancel_limit_order(sender: T::AccountId, order_hash: T::Hash) -> Result {
-		let order = Self::order(order_hash).ok_or("can not get order")?;
+		let mut order = Self::order(order_hash).ok_or("can not get order")?;
 
 		ensure!(order.owner == sender, "can only cancel your owned order");
 
@@ -767,7 +767,10 @@ impl<T: Trait> Module<T> {
 
 		<OrderLinkedItemList<T>>::remove_order(tp_hash, order.price, order.hash, order.sell_amount, order.buy_amount)?;
 
-		Self::deposit_event(RawEvent::OrderCanceled(sender, order.hash));
+		order.status = OrderStatus::Canceled;
+		<Orders<T>>::insert(order_hash, order);
+
+		Self::deposit_event(RawEvent::OrderCanceled(sender, order_hash));
 
 		Ok(())
 	}
@@ -2408,12 +2411,20 @@ mod tests {
 			order101.remained_buy_amount = tmp_amount;
 			<Orders<Test>>::insert(order101.hash, order101.clone());
 			assert_ok!(TradeModule::cancel_limit_order(Origin::signed(alice), order101.hash));
-			
+
+			let o = TradeModule::order(order101_hash).unwrap();
+			assert_eq!(o.status, OrderStatus::Canceled);
+
 			order3.status = OrderStatus::PartialFilled;
 			order3.remained_buy_amount = order3.remained_buy_amount.checked_sub(1).unwrap();
 			<Orders<Test>>::insert(order3.hash, order3.clone());
 			assert_ok!(TradeModule::cancel_limit_order(Origin::signed(bob), order3.hash));
 			assert_ok!(TradeModule::cancel_limit_order(Origin::signed(bob), order4.hash));
+
+			let o = TradeModule::order(order3_hash).unwrap();
+			assert_eq!(o.status, OrderStatus::Canceled);
+			let o = TradeModule::order(order4_hash).unwrap();
+			assert_eq!(o.status, OrderStatus::Canceled);
 
 			// bottom
 			let mut item = OrderLinkedItem::<Test> {
