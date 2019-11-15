@@ -319,8 +319,35 @@ decl_module! {
 			for index in 0 .. TradePairsIndex::get() {
 				let tp_hash = TradePairsHashByIndex::<T>::get(index).unwrap();
 				let mut tp = TradePairs::<T>::get(tp_hash).unwrap();
-				let (amount, _, _) = TPTradeDataBucket::<T>::get((tp_hash, block_number));
-				tp.one_day_trade_volume = tp.one_day_trade_volume + amount;
+
+				let data_bucket = TPTradeDataBucket::<T>::get((tp_hash, block_number));
+				
+				let mut price_bucket = TPTradePriceBucket::<T>::get(tp_hash);
+				price_bucket.0.push(data_bucket.1);
+				price_bucket.1.push(data_bucket.2);
+				TPTradePriceBucket::<T>::insert(tp_hash, &price_bucket);
+
+				let mut h_price = T::Price::min_value();
+				for i in price_bucket.0.iter() {
+					if let Some(price) = i {
+						if price > &h_price {
+							h_price = *price;
+						}
+					}
+				}
+
+				let mut l_price = T::Price::max_value();
+				for i in price_bucket.1.iter() {
+					if let Some(price) = &i {
+						if *price != T::Price::min_value() && price < &l_price {
+							l_price = *price;
+						}
+					}
+				}
+
+				tp.one_day_trade_volume = tp.one_day_trade_volume + data_bucket.0;
+				tp.one_day_highest_price = Some(h_price);
+				tp.one_day_lowest_price = Some(l_price);
 				TradePairs::<T>::insert(tp_hash, tp);
 			}
 		}
