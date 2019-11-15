@@ -199,8 +199,9 @@ decl_storage! {
 		/// TradePairHash => u64
 		TradePairOwnedTradesIndex get(trade_pair_owned_trades_index): map T::Hash => u64;
 
-		/// (TradePairHash, BlockNumber) => Sum of Trade Volume
-		TPTradeVolumeByBlock get(trade_pair_trade_vaolume_by_block): map (T::Hash, T::BlockNumber) => T::Balance;
+		/// (TradePairHash, BlockNumber) => (Sum_of_Trade_Volume, Highest_Price, Lowest_Price)
+		TPTradeDataBucket get(trade_pair_trade_data_bucket): map (T::Hash, T::BlockNumber) => (T::Balance, Option<T::Price>, Option<T::Price>);
+		TPTradePriceBucket get(trade_pair_trade_price_bucket): map (T::Hash) => (Vec<T::Price>, Vec<T::Price>);
 
 		Nonce: u64;
 	}
@@ -299,7 +300,7 @@ decl_module! {
 			for index in 0 .. TradePairsIndex::get() {
 				let tp_hash = TradePairsHashByIndex::<T>::get(index).unwrap();
 				let mut tp = TradePairs::<T>::get(tp_hash).unwrap();
-				let amount = TPTradeVolumeByBlock::<T>::get((tp_hash, block_number - days));
+				let amount = TPTradeDataBucket::<T>::get((tp_hash, block_number - days));
 				tp.one_day_trade_volume = tp.one_day_trade_volume - amount;
 				TradePairs::<T>::insert(tp_hash, tp);
 			}
@@ -309,7 +310,7 @@ decl_module! {
 			for index in 0 .. TradePairsIndex::get() {
 				let tp_hash = TradePairsHashByIndex::<T>::get(index).unwrap();
 				let mut tp = TradePairs::<T>::get(tp_hash).unwrap();
-				let amount = TPTradeVolumeByBlock::<T>::get((tp_hash, block_number));
+				let amount = TPTradeDataBucket::<T>::get((tp_hash, block_number));
 				tp.one_day_trade_volume = tp.one_day_trade_volume + amount;
 				TradePairs::<T>::insert(tp_hash, tp);
 			}
@@ -748,7 +749,7 @@ impl<T: Trait> Module<T> {
 			},
 		}
 
-		<TPTradeVolumeByBlock<T>>::mutate((tp_hash, <system::Module<T>>::block_number()), |x| *x += amount);
+		<TPTradeDataBucket<T>>::mutate((tp_hash, <system::Module<T>>::block_number()), |x| *x += amount);
 
 		<TradePairs<T>>::insert(tp_hash, tp);
 
