@@ -168,8 +168,10 @@ decl_storage! {
 		OwnedOrders get(owned_order): map (T::AccountId, u64) => Option<T::Hash>;
 		///	AccountId => Index
 		OwnedOrdersIndex get(owned_orders_index): map T::AccountId => u64;
-		/// OrderHash => Vec<TradeHash>
-		OrderOwnedTrades get(order_owned_trade): map T::Hash => Option<Vec<T::Hash>>;
+		/// (OrderHash, u64) => TradeHash
+		OrderOwnedTrades get(order_owned_trades): map (T::Hash, u64) => Option<T::Hash>;
+		/// (OrderHash, u64) => TradeHash
+		OrderOwnedTradesIndex get(order_owned_trades_index): map T::Hash => u64;
 
 		/// (TradePairHash, Index) => OrderHash
 		TradePairOwnedOrders get(trade_pair_owned_order): map (T::Hash, u64) => Option<T::Hash>;
@@ -182,13 +184,20 @@ decl_storage! {
 		/// TradeHash => Trade
 		Trades get(trade): map T::Hash => Option<Trade<T>>;
 
-		/// AccountId => Vec<TradeHash>
-		OwnedTrades get(owned_trade): map T::AccountId => Option<Vec<T::Hash>>;
-		/// (AccountId, TradePairHash) => Vec<TradeHash>
-		OwnedTPTrades get(owned_trade_pair_trade): map (T::AccountId, T::Hash) => Option<Vec<T::Hash>>;
+		/// (AccountId, u64) => TradeHash
+		OwnedTrades get(owned_trades): map (T::AccountId, u64) => Option<T::Hash>;
+		/// AccountId => u64
+		OwnedTradesIndex get(owned_trades_index): map T::AccountId => u64;
 
-		/// TradePairHash => Vec<TradeHash>
-		TradePairOwnedTrades get(trade_pair_owned_trade): map T::Hash => Option<Vec<T::Hash>>;
+		/// (AccountId, TradePairHash, u64) => TradeHash
+		OwnedTPTrades get(owned_tp_trades): map (T::AccountId, T::Hash, u64) => Option<T::Hash>;
+		/// (AccountId, TradePairHash) => u64
+		OwnedTPTradesIndex get(owned_tp_trades_index): map (T::AccountId, T::Hash) => u64;
+
+		/// (TradePairHash, u64) => TradeHash
+		TradePairOwnedTrades get(trade_pair_owned_trades): map (T::Hash, u64) => Option<T::Hash>;
+		/// TradePairHash => u64
+		TradePairOwnedTradesIndex get(trade_pair_owned_trades_index): map T::Hash => u64;
 
 		/// (TradePairHash, BlockNumber) => Sum of Trade Volume
 		TPTradeVolumeByBlock get(trade_pair_trade_vaolume_by_block): map (T::Hash, T::BlockNumber) => T::Balance;
@@ -221,58 +230,33 @@ decl_event!(
 
 impl<T: Trait> OrderOwnedTrades<T> {
 	fn add_trade(order_hash: T::Hash, trade_hash: T::Hash) {
-		let mut trades;
-		if let Some(ts) = Self::get(order_hash) {
-			trades = ts;
-		} else {
-			trades = Vec::<T::Hash>::new();
-		}
-
-		trades.push(trade_hash);
-		<OrderOwnedTrades<T>>::insert(order_hash, trades);
+		let index = OrderOwnedTradesIndex::<T>::get(&order_hash);
+		Self::insert((order_hash.clone(), index), trade_hash);
+		OrderOwnedTradesIndex::<T>::insert(order_hash, index + 1);
 	}
 }
 
 impl<T: Trait> OwnedTrades<T> {
 	fn add_trade(account_id: T::AccountId, trade_hash: T::Hash) {
-		let mut trades;
-		if let Some(ts) = Self::get(&account_id) {
-			trades = ts;
-		} else {
-			trades = Vec::<T::Hash>::new();
-		}
-
-		trades.push(trade_hash);
-		<OwnedTrades<T>>::insert(account_id, trades);
+		let index = OwnedTradesIndex::<T>::get(&account_id);
+		Self::insert((account_id.clone(), index), trade_hash);
+		OwnedTradesIndex::<T>::insert(account_id, index + 1);
 	}
 }
 
 impl<T: Trait> TradePairOwnedTrades<T> {
 	fn add_trade(tp_hash: T::Hash, trade_hash: T::Hash) {
-		let mut trades;
-		if let Some(ts) = Self::get(tp_hash) {
-			trades = ts;
-		} else {
-			trades = Vec::<T::Hash>::new();
-		}
-
-		trades.push(trade_hash);
-		<TradePairOwnedTrades<T>>::insert(tp_hash, trades);
+		let index = TradePairOwnedTradesIndex::<T>::get(&tp_hash);
+		Self::insert((tp_hash.clone(), index), trade_hash);
+		TradePairOwnedTradesIndex::<T>::insert(tp_hash, index + 1);
 	}
 }
 
 impl<T: Trait> OwnedTPTrades<T> {
 	fn add_trade(account_id: T::AccountId, tp_hash: T::Hash, trade_hash: T::Hash) {
-		// save to trade pair owned trade store
-		let mut trades;
-		if let Some(ts) = Self::get((account_id.clone(), tp_hash)) {
-			trades = ts;
-		} else {
-			trades = Vec::<T::Hash>::new();
-		}
-
-		trades.push(trade_hash);
-		<OwnedTPTrades<T>>::insert((account_id, tp_hash), trades);
+		let index = OwnedTPTradesIndex::<T>::get((account_id.clone(), tp_hash));
+		Self::insert((account_id.clone(), tp_hash, index), trade_hash);
+		OwnedTPTradesIndex::<T>::insert((account_id.clone(), tp_hash), index + 1);
 	}
 }
 
@@ -951,15 +935,26 @@ mod tests {
 
 		println!("[Market Trades]");
 
-		let trades = TradeModule::trade_pair_owned_trade(tp_hash);
-		if let Some(trades) = trades {
-			for hash in trades.iter() {
+		let index_end = TradeModule::trade_pair_owned_trades_index(tp_hash);
+		for i in 0..index_end {
+			let hash = TradeModule::trade_pair_owned_trades((tp_hash, i));
+			if let Some(hash) = hash {
 				let trade = <Trades<Test>>::get(hash).unwrap();
 				println!("[{}/{}] - {}@{}[{:?}]: [Buyer,Seller][{},{}], [Maker,Taker][{},{}], [Base,Quote][{}, {}]", 
 					trade.quote, trade.base, hash, trade.price, trade.otype, trade.buyer, trade.seller, trade.maker, 
 					trade.taker, trade.base_amount, trade.quote_amount);
 			}
 		}
+
+		// let trades = TradeModule::trade_pair_owned_trades(tp_hash);
+		// if let Some(trades) = trades {
+		// 	for hash in trades.iter() {
+		// 		let trade = <Trades<Test>>::get(hash).unwrap();
+		// 		println!("[{}/{}] - {}@{}[{:?}]: [Buyer,Seller][{},{}], [Maker,Taker][{},{}], [Base,Quote][{}, {}]", 
+		// 			trade.quote, trade.base, hash, trade.price, trade.otype, trade.buyer, trade.seller, trade.maker, 
+		// 			trade.taker, trade.base_amount, trade.quote_amount);
+		// 	}
+		// }
 
 		println!("[Trade Pair Data]");
 		let tp = TradeModule::trade_pair(tp_hash).unwrap();
@@ -1839,41 +1834,36 @@ mod tests {
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read_top(tp_hash), item);
 
-			let trades = <TradePairOwnedTrades<Test>>::get(tp_hash).unwrap();
-			let mut v = Vec::new();
-			v.push(trades[0]);
-			v.push(trades[1]);
-			v.push(trades[2]);
+			let t0_hash = <TradePairOwnedTrades<Test>>::get((tp_hash, 0));
+			let t1_hash = <TradePairOwnedTrades<Test>>::get((tp_hash, 1));
+			let t2_hash = <TradePairOwnedTrades<Test>>::get((tp_hash, 2));
 
-			assert_eq!(<OwnedTrades<Test>>::get(alice), Some(v.clone()));
-			assert_eq!(<OwnedTrades<Test>>::get(bob), Some(v.clone()));
+			assert_eq!(<OwnedTrades<Test>>::get((alice, 0)), t0_hash);
+			assert_eq!(<OwnedTrades<Test>>::get((alice, 1)), t1_hash);
+			assert_eq!(<OwnedTrades<Test>>::get((alice, 2)), t2_hash);
 
-			assert_eq!(<OwnedTPTrades<Test>>::get((alice, tp_hash)), Some(v.clone()));
-			assert_eq!(<OwnedTPTrades<Test>>::get((bob, tp_hash)), Some(v.clone()));
+			assert_eq!(<OwnedTrades<Test>>::get((bob, 0)), t0_hash);
+			assert_eq!(<OwnedTrades<Test>>::get((bob, 1)), t1_hash);
+			assert_eq!(<OwnedTrades<Test>>::get((bob, 2)), t2_hash);
 
-			assert_eq!(<TradePairOwnedTrades<Test>>::get(tp_hash), Some(v.clone()));
+			assert_eq!(<OwnedTPTrades<Test>>::get((alice, tp_hash, 0)), t0_hash);
+			assert_eq!(<OwnedTPTrades<Test>>::get((alice, tp_hash, 1)), t1_hash);
+			assert_eq!(<OwnedTPTrades<Test>>::get((alice, tp_hash, 2)), t2_hash);
 
-			assert_eq!(<OrderOwnedTrades<Test>>::get(order102_hash).unwrap().len(), 3);
-			assert_eq!(<OrderOwnedTrades<Test>>::get(order102_hash), Some(v));
+			assert_eq!(<OwnedTPTrades<Test>>::get((bob, tp_hash, 0)), t0_hash);
+			assert_eq!(<OwnedTPTrades<Test>>::get((bob, tp_hash, 1)), t1_hash);
+			assert_eq!(<OwnedTPTrades<Test>>::get((bob, tp_hash, 2)), t2_hash);
 
-			let mut v = Vec::new();
-			v.push(trades[0]);
-			assert_eq!(<OrderOwnedTrades<Test>>::get(order2_hash).unwrap().len(), 1);
-			assert_eq!(<OrderOwnedTrades<Test>>::get(order2_hash), Some(v));
+			assert_eq!(<OrderOwnedTrades<Test>>::get((order102_hash, 0)), t0_hash);
+			assert_eq!(<OrderOwnedTrades<Test>>::get((order102_hash, 1)), t1_hash);
+			assert_eq!(<OrderOwnedTrades<Test>>::get((order102_hash, 2)), t2_hash);
 
-			let mut v = Vec::new();
-			v.push(trades[1]);
-			assert_eq!(<OrderOwnedTrades<Test>>::get(order3_hash).unwrap().len(), 1);
-			assert_eq!(<OrderOwnedTrades<Test>>::get(order3_hash), Some(v));
+			assert_eq!(<OrderOwnedTrades<Test>>::get((order2_hash, 0)), t0_hash);
+			assert_eq!(<OrderOwnedTrades<Test>>::get((order3_hash, 0)), t1_hash);
+			assert_eq!(<OrderOwnedTrades<Test>>::get((order4_hash, 0)), t2_hash);
 
-			let mut v = Vec::new();
-			v.push(trades[2]);
-			assert_eq!(<OrderOwnedTrades<Test>>::get(order4_hash).unwrap().len(), 1);
-			assert_eq!(<OrderOwnedTrades<Test>>::get(order4_hash), Some(v));
-
-			assert_eq!(trades.len(), 3);
-			let t1 = <Trades<Test>>::get(trades[0]).unwrap();
-			let trade1 = Trade::<Test> {
+			let t0 = <Trades<Test>>::get(t0_hash.unwrap()).unwrap();
+			let trade0 = Trade::<Test> {
 				base: base,
 				quote: quote,
 				buyer: alice,
@@ -1884,12 +1874,12 @@ mod tests {
 				price: 10_000_000,
 				base_amount: 1,
 				quote_amount: 10,
-				..t1
+				..t0
 			};
-			assert_eq!(t1, trade1);
+			assert_eq!(t0, trade0);
 
-			let t2 = <Trades<Test>>::get(trades[1]).unwrap();
-			let trade2 = Trade::<Test> {
+			let t1 = <Trades<Test>>::get(t1_hash.unwrap()).unwrap();
+			let trade1 = Trade::<Test> {
 				base: base,
 				quote: quote,
 				buyer: alice,
@@ -1900,12 +1890,12 @@ mod tests {
 				price: 11000000,
 				base_amount: 11,
 				quote_amount: 100,
-				..t2
+				..t1
 			};
-			assert_eq!(t2, trade2);
+			assert_eq!(t1, trade1);
 
-			let t3 = <Trades<Test>>::get(trades[2]).unwrap();
-			let trade3 = Trade::<Test> {
+			let t2 = <Trades<Test>>::get(t2_hash.unwrap()).unwrap();
+			let trade2 = Trade::<Test> {
 				base: base,
 				quote: quote,
 				buyer: alice,
@@ -1916,9 +1906,9 @@ mod tests {
 				price: 11000000,
 				base_amount: 43,
 				quote_amount: 390,
-				..t3
+				..t2
 			};
-			assert_eq!(t3, trade3);
+			assert_eq!(t2, trade2);
 
 			assert_eq!(TokenModule::balance_of((alice, quote)), 500);
 			assert_eq!(TokenModule::balance_of((bob, base)), 55);
@@ -2035,43 +2025,50 @@ mod tests {
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read_top(tp_hash), item);
 
-			let trades = <TradePairOwnedTrades<Test>>::get(tp_hash).unwrap();
-			let mut v = Vec::new();
-			v.push(trades[0]);
-			v.push(trades[1]);
-			v.push(trades[2]);
-			v.push(trades[3]);
-			v.push(trades[4]);
+			let t0_hash = <TradePairOwnedTrades<Test>>::get((tp_hash, 0));
+			let t1_hash = <TradePairOwnedTrades<Test>>::get((tp_hash, 1));
+			let t2_hash = <TradePairOwnedTrades<Test>>::get((tp_hash, 2));
+			let t3_hash = <TradePairOwnedTrades<Test>>::get((tp_hash, 3));
+			let t4_hash = <TradePairOwnedTrades<Test>>::get((tp_hash, 4));
 
-			assert_eq!(<OwnedTrades<Test>>::get(alice), Some(v.clone()));
-			assert_eq!(<OwnedTrades<Test>>::get(bob), Some(v.clone()));
+			assert_eq!(<OwnedTrades<Test>>::get((alice, 0)), t0_hash);
+			assert_eq!(<OwnedTrades<Test>>::get((alice, 1)), t1_hash);
+			assert_eq!(<OwnedTrades<Test>>::get((alice, 2)), t2_hash);
+			assert_eq!(<OwnedTrades<Test>>::get((alice, 3)), t3_hash);
+			assert_eq!(<OwnedTrades<Test>>::get((alice, 4)), t4_hash);
 
-			assert_eq!(<OwnedTPTrades<Test>>::get((alice, tp_hash)), Some(v.clone()));
-			assert_eq!(<OwnedTPTrades<Test>>::get((bob, tp_hash)), Some(v.clone()));
+			assert_eq!(<OwnedTrades<Test>>::get((bob, 0)), t0_hash);
+			assert_eq!(<OwnedTrades<Test>>::get((bob, 1)), t1_hash);
+			assert_eq!(<OwnedTrades<Test>>::get((bob, 2)), t2_hash);
+			assert_eq!(<OwnedTrades<Test>>::get((bob, 3)), t3_hash);
+			assert_eq!(<OwnedTrades<Test>>::get((bob, 4)), t4_hash);
 
-			assert_eq!(<TradePairOwnedTrades<Test>>::get(tp_hash), Some(v.clone()));
+			assert_eq!(<OwnedTPTrades<Test>>::get((alice, tp_hash, 0)), t0_hash);
+			assert_eq!(<OwnedTPTrades<Test>>::get((alice, tp_hash, 1)), t1_hash);
+			assert_eq!(<OwnedTPTrades<Test>>::get((alice, tp_hash, 2)), t2_hash);
+			assert_eq!(<OwnedTPTrades<Test>>::get((alice, tp_hash, 3)), t3_hash);
+			assert_eq!(<OwnedTPTrades<Test>>::get((alice, tp_hash, 4)), t4_hash);
 
-			let mut v = Vec::new();
-			v.push(trades[3]);
-			v.push(trades[4]);
-			assert_eq!(<OrderOwnedTrades<Test>>::get(order103_hash).unwrap().len(), 2);
-			assert_eq!(<OrderOwnedTrades<Test>>::get(order103_hash), Some(v));
+			assert_eq!(<OwnedTPTrades<Test>>::get((bob, tp_hash, 0)), t0_hash);
+			assert_eq!(<OwnedTPTrades<Test>>::get((bob, tp_hash, 1)), t1_hash);
+			assert_eq!(<OwnedTPTrades<Test>>::get((bob, tp_hash, 2)), t2_hash);
+			assert_eq!(<OwnedTPTrades<Test>>::get((bob, tp_hash, 3)), t3_hash);
+			assert_eq!(<OwnedTPTrades<Test>>::get((bob, tp_hash, 4)), t4_hash);
 
-			let mut v = Vec::new();
-			v.push(trades[2]);
-			v.push(trades[3]);
-			assert_eq!(<OrderOwnedTrades<Test>>::get(order4_hash).unwrap().len(), 2);
-			assert_eq!(<OrderOwnedTrades<Test>>::get(order4_hash), Some(v));
+			assert_eq!(<OrderOwnedTrades<Test>>::get((order102_hash, 0)), t0_hash);
+			assert_eq!(<OrderOwnedTrades<Test>>::get((order102_hash, 1)), t1_hash);
+			assert_eq!(<OrderOwnedTrades<Test>>::get((order102_hash, 2)), t2_hash);
 
-			let mut v = Vec::new();
-			v.push(trades[4]);
-			assert_eq!(<OrderOwnedTrades<Test>>::get(order1_hash).unwrap().len(), 1);
-			assert_eq!(<OrderOwnedTrades<Test>>::get(order1_hash), Some(v));
+			assert_eq!(<OrderOwnedTrades<Test>>::get((order103_hash, 0)), t3_hash);
+			assert_eq!(<OrderOwnedTrades<Test>>::get((order103_hash, 1)), t4_hash);
 
-			let trades = <TradePairOwnedTrades<Test>>::get(tp_hash).unwrap();
-			assert_eq!(trades.len(), 5);
-			let t1 = <Trades<Test>>::get(trades[0]).unwrap();
-			let trade1 = Trade::<Test> {
+			assert_eq!(<OrderOwnedTrades<Test>>::get((order2_hash, 0)), t0_hash);
+			assert_eq!(<OrderOwnedTrades<Test>>::get((order3_hash, 0)), t1_hash);
+			assert_eq!(<OrderOwnedTrades<Test>>::get((order4_hash, 0)), t2_hash);
+			assert_eq!(<OrderOwnedTrades<Test>>::get((order4_hash, 1)), t3_hash);
+
+			let t0 = <Trades<Test>>::get(t0_hash.unwrap()).unwrap();
+			let trade0 = Trade::<Test> {
 				base: base,
 				quote: quote,
 				buyer: alice,
@@ -2082,12 +2079,12 @@ mod tests {
 				price: 10_000_000,
 				base_amount: 1,
 				quote_amount: 10,
-				..t1
+				..t0
 			};
-			assert_eq!(t1, trade1);
+			assert_eq!(t0, trade0);
 
-			let t2 = <Trades<Test>>::get(trades[1]).unwrap();
-			let trade2 = Trade::<Test> {
+			let t1 = <Trades<Test>>::get(t1_hash.unwrap()).unwrap();
+			let trade1 = Trade::<Test> {
 				base: base,
 				quote: quote,
 				buyer: alice,
@@ -2098,12 +2095,12 @@ mod tests {
 				price: 11000000,
 				base_amount: 11,
 				quote_amount: 100,
-				..t2
+				..t1
 			};
-			assert_eq!(t2, trade2);
+			assert_eq!(t1, trade1);
 
-			let t3 = <Trades<Test>>::get(trades[2]).unwrap();
-			let trade3 = Trade::<Test> {
+			let t2 = <Trades<Test>>::get(t2_hash.unwrap()).unwrap();
+			let trade2 = Trade::<Test> {
 				base: base,
 				quote: quote,
 				buyer: alice,
@@ -2114,12 +2111,12 @@ mod tests {
 				price: 11000000,
 				base_amount: 43,
 				quote_amount: 390,
-				..t3
+				..t2
 			};
-			assert_eq!(t3, trade3);
+			assert_eq!(t2, trade2);
 
-			let t4 = <Trades<Test>>::get(trades[3]).unwrap();
-			let trade4 = Trade::<Test> {
+			let t3 = <Trades<Test>>::get(t3_hash.unwrap()).unwrap();
+			let trade3 = Trade::<Test> {
 				base: base,
 				quote: quote,
 				buyer: alice,
@@ -2130,12 +2127,12 @@ mod tests {
 				price: 11000000,
 				base_amount: 1057,
 				quote_amount: 9610,
-				..t4
+				..t3
 			};
-			assert_eq!(t4, trade4);
+			assert_eq!(t3, trade3);
 
-			let t5 = <Trades<Test>>::get(trades[4]).unwrap();
-			let trade5 = Trade::<Test> {
+			let t4 = <Trades<Test>>::get(t4_hash.unwrap()).unwrap();
+			let trade4 = Trade::<Test> {
 				base: base,
 				quote: quote,
 				buyer: alice,
@@ -2146,9 +2143,9 @@ mod tests {
 				price: 18000000,
 				base_amount: 36,
 				quote_amount: 200,
-				..t5
+				..t4
 			};
-			assert_eq!(t5, trade5);
+			assert_eq!(t4, trade4);
 
 			assert_eq!(TokenModule::balance_of((alice, quote)), 10 + 100 + 10000 + 200);
 			assert_eq!(TokenModule::balance_of((bob, base)), 1 + 11 + 1100 + 36);
