@@ -199,6 +199,8 @@ decl_storage! {
 
 		/// (TradePairHash, BlockNumber) => (Sum_of_Trade_Volume, Highest_Price, Lowest_Price)
 		TPTradeDataBucket get(trade_pair_trade_data_bucket): map (T::Hash, T::BlockNumber) => (T::Balance, Option<T::Price>, Option<T::Price>);
+		/// store the trade pair's H/L price within last day
+		/// TradePairHash => (Vec<Highest_Price>, Vec<Lowest_Price>)
 		TPTradePriceBucket get(trade_pair_trade_price_bucket): map (T::Hash) => (Vec<Option<T::Price>>, Vec<Option<T::Price>>);
 
 		Nonce: u64;
@@ -301,6 +303,15 @@ decl_module! {
 				let (amount, _, _) = TPTradeDataBucket::<T>::get((tp_hash, block_number - days));
 				tp.one_day_trade_volume = tp.one_day_trade_volume - amount;
 				TradePairs::<T>::insert(tp_hash, tp);
+
+				let mut bucket = TPTradePriceBucket::<T>::get(tp_hash);
+				if bucket.0.len() > 0 {
+					bucket.0.remove(0);
+				}
+				if bucket.1.len() > 0 {
+					bucket.1.remove(0);
+				}
+				TPTradePriceBucket::<T>::insert(tp_hash, bucket);
 			}
 		}
 
@@ -691,33 +702,33 @@ impl<T: Trait> Module<T> {
 		let mut tp = <TradePairs<T>>::get(tp_hash).ok_or("can not get trade pair")?;
 		
 		tp.latest_matched_price = Some(price);
-
-		match tp.one_day_highest_price {
-			Some(tp_h_price) => {
-				if price > tp_h_price {
-					tp.one_day_highest_price = Some(price);
-				}
-			},
-			None => {
-				tp.one_day_highest_price = Some(price);
-			},
-		}
-
-		match tp.one_day_lowest_price {
-			Some(tp_l_price) => {
-				if price < tp_l_price {
-					tp.one_day_lowest_price = Some(price);
-				}
-			},
-			None => {
-				tp.one_day_lowest_price = Some(price);
-			},
-		}
-
+		
 		let mut bucket = <TPTradeDataBucket<T>>::get((tp_hash, <system::Module<T>>::block_number()));
 		bucket.0 = bucket.0 + amount;
-		<TPTradeDataBucket<T>>::insert((tp_hash, <system::Module<T>>::block_number()), bucket);
+		
+		match bucket.1 {
+			Some(tp_h_price) => {
+				if price > tp_h_price {
+					bucket.1 = Some(price);
+				}
+			},
+			None => {
+				bucket.1 = Some(price);
+			},
+		}
 
+		match bucket.2 {
+			Some(tp_l_price) => {
+				if price < tp_l_price {
+					bucket.2 = Some(price);
+				}
+			},
+			None => {
+				bucket.2 = Some(price);
+			},
+		}
+
+		<TPTradeDataBucket<T>>::insert((tp_hash, <system::Module<T>>::block_number()), bucket);
 		<TradePairs<T>>::insert(tp_hash, tp);
 
 		Ok(())
@@ -1676,6 +1687,10 @@ mod tests {
 			};
 			assert_eq!(OrderLinkedItemList::<Test>::read_top(tp_hash), item);
 
+			let block_number = <system::Module<Test>>::block_number();
+			let bucket = TPTradeDataBucket::<Test>::get((tp_hash, block_number));
+			assert_eq!(bucket, (0, None, None));
+
 			// [Market Orders]
 			// Bottom ==> Price(Some(0)), Next(Some(6000000)), Prev(Some(340282366920938463463374607431768211455)), Sell_Amount(0), Buy_Amount(0), Orders(0):
 			// Price(Some(6000000)), Next(None), Prev(Some(0)), Sell_Amount(24), Buy_Amount(400), Orders(1): (0x5240…b6d0@[Created]: Sell[24, 24], Buy[400, 400]),
@@ -1886,6 +1901,9 @@ mod tests {
 
 			let tp = TradeModule::trade_pair(tp_hash).unwrap();
 			assert_eq!(tp.latest_matched_price, Some(11000000));
+
+			let bucket = TPTradeDataBucket::<Test>::get((tp_hash, block_number));
+			assert_eq!(bucket, (500, Some(11000000), Some(10000000)));
 
 			// [Market Orders]
 			// Bottom ==> Price(Some(0)), Next(Some(6000000)), Prev(Some(340282366920938463463374607431768211455)), Sell_Amount(0), Buy_Amount(0), Orders(0):
@@ -2121,6 +2139,9 @@ mod tests {
 
 			let tp = TradeModule::trade_pair(tp_hash).unwrap();
 			assert_eq!(tp.latest_matched_price, Some(18000000));
+
+			let bucket = TPTradeDataBucket::<Test>::get((tp_hash, block_number));
+			assert_eq!(bucket, (10 + 100 + 10000 + 200, Some(18000000), Some(10000000)));
 
 			// [Market Orders]
 			// Bottom ==> Price(Some(0)), Next(Some(6000000)), Prev(Some(340282366920938463463374607431768211455)), Sell_Amount(0), Buy_Amount(0), Orders(0):
