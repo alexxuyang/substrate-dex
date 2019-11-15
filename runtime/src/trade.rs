@@ -89,7 +89,8 @@ pub struct Trade<T> where T: Trait {
 }
 
 const PRICE_FACTOR: u128 = 100_000_000;
-const DAYS: u32 = crate::DAYS;
+const DAYS: u32 = 6 * 10;
+// const DAYS: u32 = crate::DAYS;
 
 impl<T> LimitOrder<T> where T: Trait {
 	fn new(base: T::Hash, quote: T::Hash, owner: T::AccountId, price: T::Price, sell_amount: T::Balance, 
@@ -328,26 +329,37 @@ decl_module! {
 				TPTradePriceBucket::<T>::insert(tp_hash, &price_bucket);
 
 				let mut h_price = T::Price::min_value();
-				for i in price_bucket.0.iter() {
-					if let Some(price) = i {
-						if price > &h_price {
-							h_price = *price;
+				for price in price_bucket.0.iter() {
+					if let &Some(price) = price {
+						if price > h_price {
+							h_price = price;
 						}
 					}
 				}
 
 				let mut l_price = T::Price::max_value();
-				for i in price_bucket.1.iter() {
-					if let Some(price) = &i {
-						if *price != T::Price::min_value() && price < &l_price {
-							l_price = *price;
+				for price in price_bucket.1.iter() {
+					if let &Some(price) = price {
+						if price < l_price {
+							l_price = price;
 						}
 					}
 				}
 
 				tp.one_day_trade_volume = tp.one_day_trade_volume + data_bucket.0;
-				tp.one_day_highest_price = Some(h_price);
-				tp.one_day_lowest_price = Some(l_price);
+				
+				if h_price != T::Price::min_value() {
+					tp.one_day_highest_price = Some(h_price);
+				} else {
+					tp.one_day_highest_price = None;
+				}
+
+				if l_price != T::Price::max_value() {
+					tp.one_day_lowest_price = Some(l_price);
+				} else {
+					tp.one_day_lowest_price = None;
+				}
+				
 				TradePairs::<T>::insert(tp_hash, tp);
 			}
 		}
