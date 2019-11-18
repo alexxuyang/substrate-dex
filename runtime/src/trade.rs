@@ -1,4 +1,4 @@
-use support::{decl_module, decl_storage, decl_event, StorageValue, StorageMap, dispatch::Result, ensure, Parameter};
+use support::{decl_module, decl_storage, decl_event, StorageValue, StorageMap, dispatch::Result, ensure, Parameter, traits::{Get}};
 use sr_primitives::traits::{SimpleArithmetic, Bounded, Member, Zero, CheckedSub, Hash};
 use primitives::{U256};
 use system::ensure_signed;
@@ -13,6 +13,8 @@ use crate::types;
 pub trait Trait: token::Trait + system::Trait {
 	type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
 	type Price: Parameter + Default + Member + Bounded + SimpleArithmetic + Copy + From<u128> + Into<u128>;
+	type PriceFactor: Get<u128>;
+	type BlocksPerDay: Get<u32>;
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq)]
@@ -87,10 +89,6 @@ pub struct Trade<T> where T: Trait {
 	base_amount: T::Balance, // base token amount to exchange
 	quote_amount: T::Balance, // quote token amount to exchange
 }
-
-const PRICE_FACTOR: u128 = 100_000_000;
-const DAYS: u32 = 6 * 10;
-// const DAYS: u32 = crate::DAYS;
 
 impl<T> LimitOrder<T> where T: Trait {
 	fn new(base: T::Hash, quote: T::Hash, owner: T::AccountId, price: T::Price, sell_amount: T::Balance, 
@@ -292,9 +290,9 @@ decl_module! {
 		}
 
 		fn on_initialize(block_number: T::BlockNumber) {
-			let days: T::BlockNumber = <<T as system::Trait>::BlockNumber as From<_>>::from(DAYS);
+			let days: T::BlockNumber = <<T as system::Trait>::BlockNumber as From<_>>::from(T::BlocksPerDay::get());
 
-			if block_number < days {
+			if block_number <= days {
 				return
 			}
 
@@ -379,8 +377,8 @@ impl<T: Trait> Module<T> {
 
 		let price = LittleEndian::read_f64(price.as_slice());
 
-		let price_v2 = (PRICE_FACTOR as f64 * price) as u128;
-		let price_v3 = price_v2 as f64 / PRICE_FACTOR as f64;
+		let price_v2 = (T::PriceFactor::get() as f64 * price) as u128;
+		let price_v3 = price_v2 as f64 / T::PriceFactor::get() as f64;
 
 		ensure!(price == price_v3, "price have more digits than required");
 
@@ -393,7 +391,7 @@ impl<T: Trait> Module<T> {
 		let price_u256 = U256::from(Self::into_128(price)?);
 		let amount_u256 = U256::from(Self::into_128(amount)?);
 		let max_balance_u256 = U256::from(Self::into_128(T::Balance::max_value())?);
-		let price_factor_u256 = U256::from(PRICE_FACTOR);
+		let price_factor_u256 = U256::from(T::PriceFactor::get());
 
 		let amount_v2: U256;
 		let counterparty_amount: U256;
@@ -636,7 +634,7 @@ impl<T: Trait> Module<T> {
 
 				// remove the matched order
 				<OrderLinkedItemList<T>>::remove_all(tp_hash, !otype);
-
+				
 				// save the trade data
 				let trade = Trade::new(tp.base, tp.quote, &o, &order, base_qty, quote_qty);
 				Trades::insert(trade.hash, trade.clone());
@@ -691,8 +689,8 @@ impl<T: Trait> Module<T> {
 		// todo: optimization need, 
 		if seller_order.remained_buy_amount <= buyer_order.remained_sell_amount { // seller_order is Filled
 			let mut quote_qty: u128 = 
-				Self::into_128(seller_order.remained_buy_amount)? * PRICE_FACTOR / maker_order.price.into();
-			let buy_amount_v2 = quote_qty * Self::into_128(maker_order.price)? / PRICE_FACTOR;
+				Self::into_128(seller_order.remained_buy_amount)? * T::PriceFactor::get() / maker_order.price.into();
+			let buy_amount_v2 = quote_qty * Self::into_128(maker_order.price)? / T::PriceFactor::get();
 			if buy_amount_v2 != Self::into_128(seller_order.remained_buy_amount)? { // have fraction, seller(Filled) give more to align
 				quote_qty = quote_qty + 1;
 			}
@@ -704,8 +702,8 @@ impl<T: Trait> Module<T> {
 			))
 		} else if buyer_order.remained_buy_amount <= seller_order.remained_sell_amount { // buyer_order is Filled
 			let mut base_qty: u128 = 
-				Self::into_128(buyer_order.remained_buy_amount)? * maker_order.price.into() / PRICE_FACTOR;
-			let buy_amount_v2 = base_qty * PRICE_FACTOR / maker_order.price.into();
+				Self::into_128(buyer_order.remained_buy_amount)? * maker_order.price.into() / T::PriceFactor::get();
+			let buy_amount_v2 = base_qty * T::PriceFactor::get() / maker_order.price.into();
 			if buy_amount_v2 != Self::into_128(buyer_order.remained_buy_amount)? { // have fraction, buyer(Filled) give more to align
 				base_qty = base_qty + 1;
 			}
@@ -804,7 +802,7 @@ mod tests {
 	use sr_primitives::Perbill;
 	use sr_primitives::{
 		testing::Header,
-		traits::{BlakeTwo256, IdentityLookup},
+		traits::{BlakeTwo256, IdentityLookup, OnInitialize, OnFinalize}
 	};
     use std::cell::RefCell;
     use support::{assert_err, assert_ok, impl_outer_origin, parameter_types, traits::Get};
@@ -824,8 +822,11 @@ mod tests {
 		pub const MaximumBlockLength: u32 = 2 * 1024;
 		pub const AvailableBlockRatio: Perbill = Perbill::from_percent(75);
 		pub const BalancesTransactionBaseFee: u64 = 0;
-        pub const BalancesTransactionByteFee: u64 = 0;
+		pub const BalancesTransactionByteFee: u64 = 0;
+		pub const PriceFactor: u128 = 100_000_000;
+		pub const BlocksPerDay: u32 = 10;
 	}
+
 	impl system::Trait for Test {
 		type Origin = Origin;
 		type Call = ();
@@ -901,6 +902,8 @@ mod tests {
 	impl super::Trait for Test {
 		type Event = ();
 		type Price = u128;
+		type PriceFactor = PriceFactor;
+		type BlocksPerDay = BlocksPerDay;
 	}
 
 	// This function basically just builds a genesis storage key/value store according to
@@ -912,8 +915,31 @@ mod tests {
 			.into()
 	}
 
+	type System = system::Module<Test>;
+	type Balances = balances::Module<Test>;
 	type TokenModule = token::Module<Test>;
 	type TradeModule = super::Module<Test>;
+
+	fn run_to_block(n: u64) {
+		while System::block_number() < n {
+			TradeModule::on_finalize(System::block_number());
+			Balances::on_finalize(System::block_number());
+			System::on_finalize(System::block_number());
+			System::set_block_number(System::block_number() + 1);
+			System::on_initialize(System::block_number());
+			Balances::on_initialize(System::block_number());
+			TradeModule::on_initialize(System::block_number());
+		}
+	}
+
+	#[test]
+	fn run_to_block_works() {
+		with_externalities(&mut new_test_ext(), || {
+			assert_eq!(System::block_number(), 1);
+			run_to_block(10);
+			assert_eq!(System::block_number(), 10);
+		});
+	}
 
 	fn output_order(tp_hash: <Test as system::Trait>::Hash) {
 
@@ -2598,6 +2624,123 @@ mod tests {
 			assert_eq!(TokenModule::balance_of((bob, base)), 1 + 2499);
 			assert_eq!(TokenModule::balance_of((bob, quote)), 10000000 - 4 - 9993);
 			assert_eq!(TokenModule::freezed_balance_of((bob, base)), 0);
+		});
+	}
+
+	#[test]
+	fn trade_pair_bucket_test_case() {
+		with_externalities(&mut new_test_ext(), || {
+			let alice = 10;
+			let bob = 20;
+
+			// token1
+			assert_ok!(TokenModule::issue(Origin::signed(alice), b"66".to_vec(), 21000000));
+			let token1_hash = TokenModule::owned_token((alice, 0)).unwrap();
+			let token1 = TokenModule::token(token1_hash).unwrap();
+
+			// token2
+			assert_ok!(TokenModule::issue(Origin::signed(bob), b"77".to_vec(), 10000000));
+			let token2_hash = TokenModule::owned_token((bob, 0)).unwrap();
+			let token2 = TokenModule::token(token2_hash).unwrap();
+
+			// tradepair
+			let base = token1.hash;
+			let quote = token2.hash;
+			assert_ok!(TradeModule::create_trade_pair(Origin::signed(alice), base, quote));
+			let tp_hash = TradeModule::trade_pair_hash_by_base_quote((base, quote)).unwrap();
+
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(alice), base, quote, OrderType::Buy, 25_010_000, 2501));
+			let order101_hash = TradeModule::owned_order((alice, 0)).unwrap();
+			let order101 = TradeModule::order(order101_hash).unwrap();
+			assert_eq!(order101.sell_amount, 2501);
+			assert_eq!(order101.remained_sell_amount, 2501);
+			assert_eq!(order101.buy_amount, 10000);
+			assert_eq!(order101.remained_buy_amount, 10000);
+
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(bob), base, quote, OrderType::Sell, 25_000_000, 4));
+			let order1_hash = TradeModule::owned_order((bob, 0)).unwrap();
+			let order1 = TradeModule::order(order1_hash).unwrap();
+			assert_eq!(order1.sell_amount, 4);
+			assert_eq!(order1.remained_sell_amount, 0);
+			assert_eq!(order1.buy_amount, 1);
+			assert_eq!(order1.remained_buy_amount, 0);
+
+			assert_eq!(TokenModule::balance_of((alice, quote)), 4);
+			assert_eq!(TokenModule::balance_of((alice, base)), 21000000 - 1);
+			assert_eq!(TokenModule::balance_of((bob, base)), 1);
+			assert_eq!(TokenModule::balance_of((bob, quote)), 10000000 - 4);
+
+			run_to_block(1);
+			assert_eq!(System::block_number(), 1);
+			assert_eq!(TradeModule::trade_pair_trade_data_bucket((tp_hash, 1)), (4, Some(25_010_000), Some(25_010_000)));
+
+			for i in 2..6 {
+				run_to_block(i);
+				assert_eq!(System::block_number(), i);
+				let trade_pair = TradeModule::trade_pair(tp_hash).unwrap();
+				assert_eq!(trade_pair.latest_matched_price, Some(25_010_000));
+				assert_eq!(trade_pair.one_day_trade_volume, 4);
+				assert_eq!(trade_pair.one_day_highest_price, Some(25_010_000));
+				assert_eq!(trade_pair.one_day_lowest_price, Some(25_010_000));
+				assert_eq!(TradeModule::trade_pair_trade_data_bucket((tp_hash, i)), (0, None, None));
+			}
+
+			assert_eq!(TradeModule::trade_pair_trade_data_bucket((tp_hash, 1)), (4, Some(25_010_000), Some(25_010_000)));
+			assert_eq!(TradeModule::trade_pair_trade_data_bucket((tp_hash, 2)), (0, None, None));
+			assert_eq!(TradeModule::trade_pair_trade_data_bucket((tp_hash, 3)), (0, None, None));
+			assert_eq!(TradeModule::trade_pair_trade_data_bucket((tp_hash, 4)), (0, None, None));
+			assert_eq!(TradeModule::trade_pair_trade_data_bucket((tp_hash, 5)), (0, None, None));
+
+			assert_ok!(TradeModule::create_limit_order(Origin::signed(bob), base, quote, OrderType::Sell, 25_000_000, 9996));
+			let order1_hash = TradeModule::owned_order((bob, 1)).unwrap();
+			let order1 = TradeModule::order(order1_hash).unwrap();
+			assert_eq!(order1.sell_amount, 9996);
+			assert_eq!(order1.remained_sell_amount, 0);
+			assert_eq!(order1.buy_amount, 2499);
+			assert_eq!(order1.remained_buy_amount, 0);
+
+			let order101_hash = TradeModule::owned_order((alice, 0)).unwrap();
+			let order101 = TradeModule::order(order101_hash).unwrap();
+			assert_eq!(order101.sell_amount, 2501);
+			assert_eq!(order101.remained_sell_amount, 1);
+			assert_eq!(order101.buy_amount, 10000);
+			assert_eq!(order101.remained_buy_amount, 3);
+
+			assert_eq!(TokenModule::balance_of((alice, quote)), 4 + 9993);
+			assert_eq!(TokenModule::balance_of((alice, base)), 21000000 - 1 - 2499);
+			assert_eq!(TokenModule::freezed_balance_of((alice, base)), 1);
+			assert_eq!(TokenModule::balance_of((bob, base)), 1 + 2499);
+			assert_eq!(TokenModule::balance_of((bob, quote)), 10000000 - 4 - 9993);
+			assert_eq!(TokenModule::freezed_balance_of((bob, base)), 0);
+
+			for i in 7..11 {
+				run_to_block(i);
+				assert_eq!(System::block_number(), i);
+				let trade_pair = TradeModule::trade_pair(tp_hash).unwrap();
+				assert_eq!(trade_pair.latest_matched_price, Some(25_010_000));
+				assert_eq!(trade_pair.one_day_trade_volume, 4 + 9993);
+				assert_eq!(trade_pair.one_day_highest_price, Some(25_010_000));
+				assert_eq!(trade_pair.one_day_lowest_price, Some(25_010_000));
+				assert_eq!(TradeModule::trade_pair_trade_data_bucket((tp_hash, i)), (0, None, None));
+			}
+
+			run_to_block(12);
+			assert_eq!(System::block_number(), 12);
+			assert_eq!(TradeModule::trade_pair_trade_data_bucket((tp_hash, 11)), (0, None, None));
+
+			let trade_pair = TradeModule::trade_pair(tp_hash).unwrap();
+			assert_eq!(trade_pair.latest_matched_price, Some(25_010_000));
+			assert_eq!(trade_pair.one_day_trade_volume, 9993);
+			assert_eq!(trade_pair.one_day_highest_price, Some(25_010_000));
+			assert_eq!(trade_pair.one_day_lowest_price, Some(25_010_000));
+
+			run_to_block(16);
+
+			let trade_pair = TradeModule::trade_pair(tp_hash).unwrap();
+			assert_eq!(trade_pair.latest_matched_price, Some(25_010_000));
+			assert_eq!(trade_pair.one_day_trade_volume, 0);
+			assert_eq!(trade_pair.one_day_highest_price, None);
+			assert_eq!(trade_pair.one_day_lowest_price, None);
 		});
 	}
 

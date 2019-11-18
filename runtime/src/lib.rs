@@ -229,6 +229,8 @@ parameter_types! {
 	pub const CreationFee: u128 = 0;
 	pub const TransactionBaseFee: u128 = 0;
 	pub const TransactionByteFee: u128 = 1;
+	pub const PriceFactor: u128 = 100_000_000;
+	pub const BlocksPerDay: u32 = 6 * 60 * 24;
 }
 
 impl balances::Trait for Runtime {
@@ -269,6 +271,8 @@ impl token::Trait for Runtime {
 impl trade::Trait for Runtime {
 	type Event = Event;
 	type Price = u128;
+	type PriceFactor = PriceFactor;
+	type BlocksPerDay = BlocksPerDay;
 }
 
 construct_runtime!(
