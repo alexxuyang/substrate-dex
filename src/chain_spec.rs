@@ -52,7 +52,6 @@ impl Alternative {
 					testnet_genesis(
 						vec![
 							get_authority_keys_from_seed("Alice"),
-							get_authority_keys_from_seed("Bob"),
 						],
 						get_from_seed::<AccountId>("Alice"),
 						vec![
