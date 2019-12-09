@@ -200,7 +200,7 @@ decl_storage! {
 		TPTradeDataBucket get(trade_pair_trade_data_bucket): map (T::Hash, T::BlockNumber) => (T::Balance, Option<T::Price>, Option<T::Price>);
 		/// store the trade pair's H/L price within last day
 		/// TradePairHash => (Vec<Highest_Price>, Vec<Lowest_Price>)
-		TPTradePriceBucket get(trade_pair_trade_price_bucket): map (T::Hash) => (Vec<Option<T::Price>>, Vec<Option<T::Price>>);
+		TPTradePriceBucket get(trade_pair_trade_price_bucket): map T::Hash => (Vec<Option<T::Price>>, Vec<Option<T::Price>>);
 
 		Nonce: u64;
 	}
@@ -638,6 +638,8 @@ impl<T: Trait> Module<T> {
 				// save the trade data
 				let trade = Trade::new(tp.base, tp.quote, &o, &order, base_qty, quote_qty);
 				Trades::insert(trade.hash, trade.clone());
+
+		        Self::deposit_event(RawEvent::TradeCreated(order.owner.clone(), tp.base, tp.quote, tp_hash, trade.clone()));
 
 				// save trade reference data to store
 				<OrderOwnedTrades<T>>::add_trade(order.hash, trade.hash);
