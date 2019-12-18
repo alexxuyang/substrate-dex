@@ -1,0 +1,15 @@
+name: Rust
+
+on: [push]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v1
+    - name: Build
+      run: cargo build --release
+    - name: Run tests
+      run: cargo test -p dex-v2-runtime -- --test-threads=1 --nocapture
