@@ -63,8 +63,6 @@ pub type Hash = primitives::H256;
 /// Digest item type.
 pub type DigestItem = generic::DigestItem<Hash>;
 
-/// Used for the module template in `./template.rs`
-mod template;
 mod token;
 mod trade;
 mod types;
@@ -259,11 +257,6 @@ impl sudo::Trait for Runtime {
 	type Proposal = Call;
 }
 
-/// Used for the module template in `./template.rs`
-impl template::Trait for Runtime {
-	type Event = Event;
-}
-
 impl token::Trait for Runtime {
 	type Event = Event;
 }
@@ -288,8 +281,6 @@ construct_runtime!(
 		Indices: indices::{default, Config<T>},
 		Balances: balances,
 		Sudo: sudo,
-		// Used for the module template in `./template.rs`
-		TemplateModule: template::{Module, Call, Storage, Event<T>},
 		TokenModule: token::{Module, Call, Storage, Event<T>},
 		TradeModule: trade::{Module, Call, Storage, Event<T>},
 	}
