@@ -1,4 +1,8 @@
+
+
 # Dex demo build by substrate
+
+Please refer to the [wiki](https://github.com/alexxuyang/substrate-dex/wiki) for the detail information. (Continuously updated)
 
 ## Build
 
