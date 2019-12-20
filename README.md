@@ -2,6 +2,12 @@
 
 # Dex demo build by substrate
 
+This is a decentralized exchange (DEX) build by substrate.
+
+_**WARNING**_ This project is just for demo/poc/self-learning. The author does not guarantee any availability or stability. And we ***DO NOT*** suggest use it in any production environment.
+
+Any questions, feel free to post an issue.
+
 Please refer to the [wiki](https://github.com/alexxuyang/substrate-dex/wiki) for the detail information. (Continuously updated)
 
 ## Build
