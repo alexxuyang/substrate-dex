@@ -639,7 +639,7 @@ impl<T: Trait> Module<T> {
 				let trade = Trade::new(tp.base, tp.quote, &o, &order, base_qty, quote_qty);
 				Trades::insert(trade.hash, trade.clone());
 
-		        Self::deposit_event(RawEvent::TradeCreated(order.owner.clone(), tp.base, tp.quote, tp_hash, trade.clone()));
+		        Self::deposit_event(RawEvent::TradeCreated(order.owner.clone(), tp.base, tp.quote, trade.hash, trade.clone()));
 
 				// save trade reference data to store
 				<OrderOwnedTrades<T>>::add_trade(order.hash, trade.hash);
@@ -785,7 +785,14 @@ impl<T: Trait> Module<T> {
 		<OrderLinkedItemList<T>>::remove_order(tp_hash, order.price, order.hash, order.sell_amount, order.buy_amount)?;
 
 		order.status = OrderStatus::Canceled;
-		<Orders<T>>::insert(order_hash, order);
+		<Orders<T>>::insert(order_hash, order.clone());
+
+        let sell_hash = match order.otype {
+            OrderType::Buy => order.base,
+            OrderType::Sell => order.quote,
+        };
+
+        <token::Module<T>>::do_unfreeze(sender.clone(), sell_hash, order.remained_sell_amount)?;
 
 		Self::deposit_event(RawEvent::OrderCanceled(sender, order_hash));
 
