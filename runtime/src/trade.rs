@@ -1,3 +1,4 @@
+use rstd::if_std;
 use support::{decl_module, decl_storage, decl_event, StorageValue, StorageMap, dispatch::Result, ensure, Parameter, traits::{Get}};
 use sr_primitives::traits::{SimpleArithmetic, Bounded, Member, Zero, CheckedSub, Hash};
 use primitives::{U256};
@@ -9,6 +10,7 @@ use byteorder::{ByteOrder, LittleEndian};
 
 use crate::token;
 use crate::types;
+use crate::utils;
 
 pub trait Trait: token::Trait + system::Trait {
 	type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
@@ -479,8 +481,11 @@ impl<T: Trait> Module<T> {
 	fn do_create_limit_order(sender: T::AccountId, base: T::Hash, quote: T::Hash, otype: OrderType, price: T::Price, 
 		sell_amount: T::Balance) -> Result {
 
-        #[cfg(feature = "std")]
-        eprintln!("create limit order begin");
+        if_std! {
+            eprintln!("create limit order begin");
+            let hex_string = hex::encode("Hello world!");
+            println!("{}", hex_string);
+        }
 
 		Self::ensure_bounds(price, sell_amount)?;
 		let buy_amount = Self::ensure_counterparty_amount_bounds(otype, price, sell_amount)?;
@@ -502,8 +507,9 @@ impl<T: Trait> Module<T> {
 		Nonce::mutate(|n| *n += 1);
 		Self::deposit_event(RawEvent::OrderCreated(sender.clone(), base, quote, hash, order.clone()));
 
-        #[cfg(feature = "std")] 
-        eprintln!("[order1]: Base[{:#?}], Quote[{:#?}], Owner[{:#?}], Type[{:#?}], Status[{:#?}], SellAmount[{:#?}], RemainedSellAmount[{:#?}], BuyAmount[{:#?}], RemainBuyAmount[{:#?}]", base.as_ref(), quote.as_ref(), order.owner, order.otype, order.status, order.sell_amount, order.remained_sell_amount, order.buy_amount, order.remained_buy_amount);
+        if_std! {
+            eprintln!("[order1]: Base[{:02x}], Quote[{:02x}], Owner[{:#?}], Type[{:#?}], Status[{:#?}], SellAmount[{:#?}], RemainedSellAmount[{:#?}], BuyAmount[{:#?}], RemainBuyAmount[{:#?}]", utils::ByteBuf(base.as_ref()), utils::ByteBuf(quote.as_ref()), order.owner, order.otype, order.status, order.sell_amount, order.remained_sell_amount, order.buy_amount, order.remained_buy_amount);
+        }
 
 		let owned_index = Self::owned_orders_index(sender.clone());
 		OwnedOrders::<T>::insert((sender.clone(), owned_index), hash);
@@ -521,15 +527,17 @@ impl<T: Trait> Module<T> {
 			<OrderLinkedItemList<T>>::append(tp_hash, price, hash, order.remained_sell_amount, order.remained_buy_amount, otype);
 		}
 
-        #[cfg(feature = "std")]
-        eprintln!("create limit order end");
+        if_std! {
+            eprintln!("create limit order end");
+        }
 
 		Ok(())
 	}
 
 	fn order_match(tp_hash: T::Hash, order: &mut LimitOrder<T>) -> result::Result<bool, &'static str> {
-        #[cfg(feature = "std")]
-        eprintln!("order match begin");
+        if_std! {
+            eprintln!("order match begin");
+        }
 
 		let mut head = <OrderLinkedItemList<T>>::read_head(tp_hash);
 
@@ -653,16 +661,11 @@ impl<T: Trait> Module<T> {
 
 		        Self::deposit_event(RawEvent::TradeCreated(order.owner.clone(), tp.base, tp.quote, trade.hash, trade.clone()));
 
-                #[cfg(feature = "std")] 
-                eprintln!("Order Matched");
-
-                #[cfg(feature = "std")] 
-                eprintln!("[order1]: Base[{:#?}], Quote[{:#?}], Owner[{:#?}], Type[{:#?}], Status[{:#?}], SellAmount[{:#?}], RemainedSellAmount[{:#?}], BuyAmount[{:#?}], RemainBuyAmount[{:#?}]", tp.base.as_ref(), tp.quote.as_ref(), order.owner, order.otype, order.status, order.sell_amount, order.remained_sell_amount, order.buy_amount, order.remained_buy_amount);
-                #[cfg(feature = "std")] 
-                eprintln!("[order2]: Base[{:#?}], Quote[{:#?}], Owner[{:#?}], Type[{:#?}], Status[{:#?}], SellAmount[{:#?}], RemainedSellAmount[{:#?}], BuyAmount[{:#?}], RemainBuyAmount[{:#?}]", tp.base.as_ref(), tp.quote.as_ref(), o.owner, o.otype, order.status, o.sell_amount, o.remained_sell_amount, o.buy_amount, o.remained_buy_amount);
-
-                #[cfg(feature = "std")] 
-                eprintln!("[trade]: Hash[{:#?}], BaseQty[{:#?}], QuoteQty[{:#?}]", trade.hash.as_ref(), base_qty, quote_qty);
+                if_std! {
+                    eprintln!("[order1]: Base[{:02x}], Quote[{:02x}], Owner[{:#?}], Type[{:#?}], Status[{:#?}], SellAmount[{:#?}], RemainedSellAmount[{:#?}], BuyAmount[{:#?}], RemainBuyAmount[{:#?}]", utils::ByteBuf(tp.base.as_ref()), utils::ByteBuf(tp.quote.as_ref()), order.owner, order.otype, order.status, order.sell_amount, order.remained_sell_amount, order.buy_amount, order.remained_buy_amount);
+                    eprintln!("[order2]: Base[{:02x}], Quote[{:02x}], Owner[{:#?}], Type[{:#?}], Status[{:#?}], SellAmount[{:#?}], RemainedSellAmount[{:#?}], BuyAmount[{:#?}], RemainBuyAmount[{:#?}]", utils::ByteBuf(tp.base.as_ref()), utils::ByteBuf(tp.quote.as_ref()), o.owner, o.otype, order.status, o.sell_amount, o.remained_sell_amount, o.buy_amount, o.remained_buy_amount);
+                    eprintln!("[trade]: Hash[{:02x}], BaseQty[{:#?}], QuoteQty[{:#?}]", utils::ByteBuf(trade.hash.as_ref()), base_qty, quote_qty);
+                }
 
 				// save trade reference data to store
 				<OrderOwnedTrades<T>>::add_trade(order.hash, trade.hash);
@@ -684,8 +687,9 @@ impl<T: Trait> Module<T> {
 			head = <OrderLinkedItemList<T>>::read_head(tp_hash);
 		}
 
-        #[cfg(feature = "std")]
-        eprintln!("order match end");
+        if_std! {
+            eprintln!("order match end");
+        }
 
 		if order.status == OrderStatus::Filled {
 			Ok(true)
@@ -800,11 +804,10 @@ impl<T: Trait> Module<T> {
 	}
 
 	fn do_cancel_limit_order(sender: T::AccountId, order_hash: T::Hash) -> Result {
-        #[cfg(feature = "std")] 
-        eprintln!("cancel limit order begin");
-
-        #[cfg(feature = "std")] 
-        eprintln!("[order]: hash[{:#?}]", order_hash.as_ref());
+        if_std! {
+            eprintln!("cancel limit order begin");
+            eprintln!("[order]: hash[{:02x}]", utils::ByteBuf(order_hash.as_ref()));
+        }
 
 		let mut order = Self::order(order_hash).ok_or("can not get order")?;
 
@@ -819,8 +822,9 @@ impl<T: Trait> Module<T> {
 		order.status = OrderStatus::Canceled;
 		<Orders<T>>::insert(order_hash, order.clone());
 
-        #[cfg(feature = "std")] 
-        eprintln!("[order canceled]: hash[{:#?}], status[{:#?}]", order_hash.as_ref(), order.status);
+        if_std! {
+            eprintln!("[order canceled]: hash[{:02x}], status[{:#?}]", utils::ByteBuf(order_hash.as_ref()), order.status);
+        }
 
         let sell_hash = match order.otype {
             OrderType::Buy => order.base,
@@ -831,8 +835,9 @@ impl<T: Trait> Module<T> {
 
 		Self::deposit_event(RawEvent::OrderCanceled(sender, order_hash));
 
-        #[cfg(feature = "std")] 
-        eprintln!("cancel limit order end");
+        if_std! {
+            eprintln!("cancel limit order end");
+        }
 
 		Ok(())
 	}

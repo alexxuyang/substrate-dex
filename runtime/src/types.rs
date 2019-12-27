@@ -1,9 +1,11 @@
+use rstd::if_std;
 use codec::{Decode, Encode};
 use rstd::prelude::*;
 use sr_primitives::traits::{Bounded, Member, SimpleArithmetic};
 use support::{dispatch::Result, ensure, Parameter, StorageMap};
 
 use crate::trade::{self, *};
+use crate::utils;
 
 #[derive(Encode, Decode, Clone)]
 #[cfg_attr(feature = "std", derive(PartialEq, Eq, Debug))]
@@ -100,11 +102,10 @@ where
 	}
 
 	pub fn append(key1: K1, key2: K2, value: K1, sell_amount: K3, buy_amount: K3, otype: OrderType) {
-        #[cfg(feature = "std")] 
-        eprintln!("order book append item begin");
-
-        #[cfg(feature = "std")] 
-        eprintln!("order book append item: tp_hash[{:#?}], price[{:#?}], order_hash[{:#?}], order_type:[{:#?}], sell_amount[{:#?}], buy_amount[{:#?}]", key1.as_ref(), key2, value.as_ref(), otype, sell_amount, buy_amount);
+        if_std! {
+            eprintln!("order book append item begin");
+            eprintln!("order book append item: tp_hash[{:02x}], price[{:#?}], order_hash[{:02x}], order_type:[{:#?}], sell_amount[{:#?}], buy_amount[{:#?}]", utils::ByteBuf(key1.as_ref()), key2, utils::ByteBuf(value.as_ref()), otype, sell_amount, buy_amount);
+        }
 
 		let item = S::get((key1, Some(key2)));
 		match item {
@@ -178,8 +179,9 @@ where
 			}
 		};
 
-        #[cfg(feature = "std")] 
-        eprintln!("order book append item end");
+        if_std! {
+            eprintln!("order book append item end");
+        }
 	}
 
 	pub fn next_match_price(item: &LinkedItem<K1, K2, K3>, otype: OrderType) -> Option<K2> {
@@ -198,8 +200,9 @@ where
 	}
 
 	pub fn remove_all(key1: K1, otype: OrderType) {
-        #[cfg(feature = "std")] 
-        eprintln!("order book remove all items begin");
+        if_std! {
+            eprintln!("order book remove all items begin");
+        }
 
 		let end_item;
 
@@ -225,13 +228,15 @@ where
 			head = Self::read_head(key1);
 		}
 
-        #[cfg(feature = "std")] 
-        eprintln!("order book remove all items end");
+        if_std! {
+            eprintln!("order book remove all items end");
+        }
 	}
 
 	pub fn remove_order(key1: K1, key2: K2, order_hash: K1, sell_amount: K3, buy_amount: K3) -> Result {
-        #[cfg(feature = "std")] 
-        eprintln!("order book cancel order begin");
+        if_std! {
+            eprintln!("order book cancel order begin");
+        }
 
 		match S::get((key1, Some(key2))) {
 			Some(mut item) => {
@@ -245,8 +250,9 @@ where
 				item.sell_amount = item.sell_amount - sell_amount;
 				Self::write(key1, Some(key2), item.clone());
 
-                #[cfg(feature = "std")] 
-                eprintln!("order book cancel order: tp_hash[{:#?}], price[{:#?}], order_hash[{:#?}]", key1.as_ref(), key2, order_hash.as_ref());
+                if_std! {
+                    eprintln!("order book cancel order: tp_hash[{:02x}], price[{:#?}], order_hash[{:02x}]", utils::ByteBuf(key1.as_ref()), key2, utils::ByteBuf(order_hash.as_ref()));
+                }
 
 				if item.orders.len() == 0 {
 					Self::remove_item(key1, key2);
@@ -255,15 +261,17 @@ where
 			None => {}
 		}
 
-        #[cfg(feature = "std")] 
-        eprintln!("order book cancel order end");
+        if_std! {
+            eprintln!("order book cancel order end");
+        }
 
 		Ok(())
 	}
 
 	pub fn remove_item(key1: K1, key2: K2) {
-        #[cfg(feature = "std")] 
-        eprintln!("order book remove item begin");
+        if_std! {
+            eprintln!("order book remove item begin");
+        }
 
 		if let Some(item) = S::take((key1, Some(key2))) {
 			S::mutate((key1.clone(), item.prev), |x| {
@@ -278,18 +286,21 @@ where
 				}
 			});
 
-            #[cfg(feature = "std")] 
-            eprintln!("order book remove item: tp_hash[{:#?}], price[{:#?}]", key1.as_ref(), key2);
+            if_std! {
+                eprintln!("order book remove item: tp_hash[{:02x}], price[{:#?}]", utils::ByteBuf(key1.as_ref()), key2);
+            }
 		}
 
-        #[cfg(feature = "std")] 
-        eprintln!("order book remove itme end");
+        if_std! {
+            eprintln!("order book remove itme end");
+        }
 	}
 
 	// when the order is canceled, it should be remove from Sell / Buy orders
 	pub fn remove_orders_in_one_item(key1: K1, key2: K2) -> Result {
-        #[cfg(feature = "std")] 
-        eprintln!("order book remove order begin");
+        if_std! {
+            eprintln!("order book remove order begin");
+        }
 
 		match S::get((key1, Some(key2))) {
 			Some(mut item) => {
@@ -304,8 +315,9 @@ where
 
 					Self::write(key1, Some(key2), item.clone());
 
-                    #[cfg(feature = "std")] 
-                    eprintln!("order book remove order: tp_hash[{:#?}], price[{:#?}], Owner[{:#?}], Type[{:#?}], Status[{:#?}], SellAmount[{:#?}], RemainedSellAmount[{:#?}], BuyAmount[{:#?}], RemainBuyAmount[{:#?}]", key1.as_ref(), key2, order.owner, order.otype, order.status, order.sell_amount, order.remained_sell_amount, order.buy_amount, order.remained_buy_amount);
+                    if_std! {
+                        eprintln!("order book remove order: tp_hash[{:02x}], price[{:#?}], Owner[{:#?}], Type[{:#?}], Status[{:#?}], SellAmount[{:#?}], RemainedSellAmount[{:#?}], BuyAmount[{:#?}], RemainBuyAmount[{:#?}]", utils::ByteBuf(key1.as_ref()), key2, order.owner, order.otype, order.status, order.sell_amount, order.remained_sell_amount, order.buy_amount, order.remained_buy_amount);
+                    }
 
 				}
 
@@ -316,8 +328,9 @@ where
 			None => {}
 		}
 
-        #[cfg(feature = "std")] 
-        eprintln!("order book remove order end");
+        if_std! {
+            eprintln!("order book remove order end");
+        }
 
 		Ok(())
 	}
