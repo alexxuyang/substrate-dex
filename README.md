@@ -63,6 +63,20 @@ yarn start
 
 Then open the link [http://localhost:3000/#/?rpc=ws://127.0.0.1:9944](http://localhost:3000/#/?rpc=ws://127.0.0.1:9944)
 
+### How to test
+
+Test all the test cases by:
+
+```Rust
+cargo test -p dex-v2-runtime -- --test-threads=1 --nocapture
+```
+
+Or you can just run one of the test cases by:
+
+```Rust
+cargo test [TEST_CASE_NAME] -p dex-v2-runtime -- --test-threads=1 --nocapture
+```
+
 ### About next step
 
 - Will provide a full-feature dex front-end build with polkadotjs
