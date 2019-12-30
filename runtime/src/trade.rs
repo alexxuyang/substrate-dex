@@ -534,6 +534,7 @@ impl<T: Trait> Module<T> {
 		// add order to the market order list
 		if !filled {
 			<OrderLinkedItemList<T>>::append(tp_hash, price, hash, order.remained_sell_amount, order.remained_buy_amount, otype);
+            Self::debug_log_market(tp_hash);
 		}
 
         if_std! {
@@ -673,6 +674,7 @@ impl<T: Trait> Module<T> {
                 order.debug_log();
                 o.debug_log();
                 trade.debug_log();
+                Self::debug_log_market(tp_hash);
 
 				// save trade reference data to store
 				<OrderOwnedTrades<T>>::add_trade(order.hash, trade.hash);
@@ -830,6 +832,7 @@ impl<T: Trait> Module<T> {
 		<Orders<T>>::insert(order_hash, order.clone());
 
         order.debug_log();
+        Self::debug_log_market(tp_hash);
 
         let sell_hash = match order.otype {
             OrderType::Buy => order.base,
@@ -845,6 +848,66 @@ impl<T: Trait> Module<T> {
         }
 
 		Ok(())
+	}
+
+	fn debug_log_market(tp_hash: T::Hash) {
+        if_std! {
+            let mut item = <OrderLinkedItemList<T>>::read_bottom(tp_hash);
+
+            eprintln!("[Market Orders]");
+
+            loop {
+                if item.price == Some(T::Price::min_value()) {
+                    eprint!("Bottom ==> ");
+                } else if item.price == Some(T::Price::max_value()) {
+                    eprint!("Top ==> ");
+                } else if item.price == None {
+                    eprint!("Head ==> ");
+                }
+
+                eprint!("Price({:?}), Next({:?}), Prev({:?}), Sell_Amount({:?}), Buy_Amount({:?}), Orders({}): ", 
+                    item.price, item.next, item.prev, item.sell_amount, item.buy_amount, item.orders.len());
+
+                let mut orders = item.orders.iter();
+                loop {
+                    match orders.next() {
+                        Some(order_hash) => {
+                            let order = <Orders<T>>::get(order_hash).unwrap();
+                            eprint!("({}@[{:?}]: Sell[{:?}, {:?}], Buy[{:?}, {:?}]), ", order.hash, order.status, 
+                                order.sell_amount, order.remained_sell_amount, order.buy_amount, order.remained_buy_amount);
+                        },
+                        None => break,
+                    }
+                }
+
+                eprintln!("");
+
+                if item.next == Some(T::Price::min_value()) {
+                    break;
+                } else {
+                    item = OrderLinkedItemList::<T>::read(tp_hash, item.next);
+                }
+            }
+
+            eprintln!("[Market Trades]");
+
+            let index_end = Self::trade_pair_owned_trades_index(tp_hash);
+            for i in 0..index_end {
+                let hash = Self::trade_pair_owned_trades((tp_hash, i));
+                if let Some(hash) = hash {
+                    let trade = <Trades<T>>::get(hash).unwrap();
+                    eprintln!("[{}/{}] - {}@{:?}[{:?}]: [Buyer,Seller][{},{}], [Maker,Taker][{},{}], [Base,Quote][{:?}, {:?}]", 
+                        trade.quote, trade.base, hash, trade.price, trade.otype, trade.buyer, trade.seller, trade.maker, 
+                        trade.taker, trade.base_amount, trade.quote_amount);
+                }
+            }
+
+            eprintln!("[Trade Pair Data]");
+            let tp = Self::trade_pair(tp_hash).unwrap();
+            eprintln!("latest matched price: {:?}", tp.latest_matched_price);
+
+            eprintln!();
+        }
 	}
 }
 
