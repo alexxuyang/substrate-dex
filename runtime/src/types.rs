@@ -1,8 +1,8 @@
-use rstd::if_std;
-use codec::{Decode, Encode};
-use rstd::prelude::*;
-use sr_primitives::traits::{Bounded, Member, SimpleArithmetic};
-use support::{dispatch::Result, ensure, Parameter, StorageMap};
+use sp_std::if_std;
+use codec::{Decode, Encode, EncodeLike};
+use sp_std::prelude::*;
+use sp_runtime::{DispatchResult as Result, traits::{Bounded, Member, SimpleArithmetic}};
+use frame_support::{ensure, Parameter, StorageMap};
 
 use crate::trade::{self, *};
 use crate::utils;
@@ -18,7 +18,7 @@ pub struct LinkedItem<K1, K2, K3> {
 	pub orders: Vec<K1>, // remove the item at 0 index will caused performance issue, should be optimized
 }
 
-pub struct LinkedList<T, S, K1, K2, K3>(rstd::marker::PhantomData<(T, S, K1, K2, K3)>);
+pub struct LinkedList<T, S, K1, K2, K3>(sp_std::marker::PhantomData<(T, S, K1, K2, K3)>);
 
 ///             LinkedItem          LinkedItem			LinkedItem          LinkedItem          LinkedItem
 ///             Bottom              Buy Order			Head                Sell Order          Top
@@ -26,11 +26,11 @@ pub struct LinkedList<T, S, K1, K2, K3>(rstd::marker::PhantomData<(T, S, K1, K2,
 ///   max <---- Prev				Next		---->	Price:None  <----   Prev                Next        ---->   Price: 0
 ///         	Price:0		<----   Prev     			Next        ---->   Price 10   <----    Prev
 ///                                 Orders									Orders
-///                                 o1: Hash -> buy 1@5						o101: Hash -> sell 100@10
-///                                 o2: Hash -> buy 5@5						o102: Hash -> sell 100@5000
-///                                 o3: Hash -> buy 100@5
-///                                 o4: Hash -> buy 40@5
-///                                 o5: Hash -> buy 1000@5
+///                                 o1: Hash -> buy 1@8						o101: Hash -> sell 100@10
+///                                 o2: Hash -> buy 5@8						o102: Hash -> sell 100@10
+///                                 o3: Hash -> buy 100@8
+///                                 o4: Hash -> buy 40@8
+///                                 o5: Hash -> buy 1000@8
 ///                                     
 /// when do order matching, o1 will match before o2 and so on
 
@@ -38,10 +38,11 @@ pub struct LinkedList<T, S, K1, K2, K3>(rstd::marker::PhantomData<(T, S, K1, K2,
 impl<T, S, K1, K2, K3> LinkedList<T, S, K1, K2, K3>
 where
 	T: trade::Trait,
-	K1: Encode
+	K1: EncodeLike 
+        + Encode
 		+ Decode
 		+ Clone
-		+ rstd::borrow::Borrow<<T as system::Trait>::Hash>
+		+ sp_std::borrow::Borrow<<T as system::Trait>::Hash>
 		+ Copy
 		+ PartialEq
         + AsRef<[u8]>,
@@ -318,7 +319,6 @@ where
                     if_std! {
                         eprintln!("order book remove order: tp_hash[0x{:02x}], order_hash[0x{:02x}], Owner[{:#?}], Type[{:#?}], Status[{:#?}], SellAmount[{:#?}], RemainedSellAmount[{:#?}], BuyAmount[{:#?}], RemainBuyAmount[{:#?}]", utils::ByteBuf(key1.as_ref()), utils::ByteBuf(order.hash.as_ref()), order.owner, order.otype, order.status, order.sell_amount, order.remained_sell_amount, order.buy_amount, order.remained_buy_amount);
                     }
-
 				}
 
 				if item.orders.len() == 0 {

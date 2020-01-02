@@ -1,4 +1,4 @@
-use rstd::if_std;
+use sp_std::if_std;
 
 if_std! {
     pub struct ByteBuf<'a>(pub &'a [u8]);
