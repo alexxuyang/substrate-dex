@@ -321,6 +321,8 @@ decl_module! {
 	pub struct Module<T: Trait> for enum Call where origin: T::Origin {
 		fn deposit_event() = default;
 
+        type Error = Error<T>;
+
 		pub fn create_trade_pair(origin, base: T::Hash, quote: T::Hash) -> Result<(), dispatch::DispatchError> {
 			let sender = ensure_signed(origin)?;
 
