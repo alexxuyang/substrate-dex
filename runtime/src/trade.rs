@@ -764,10 +764,26 @@ impl<T: Trait> Module<T> {
 			buyer_order = maker_order;
 			seller_order = taker_order;
 		}
-
+        
 		// todo: overflow checked need
 		// todo: optimization need, 
+        let mut seller_order_filled = true;
 		if seller_order.remained_buy_amount <= buyer_order.remained_sell_amount { // seller_order is Filled
+			let mut quote_qty: u128 = 
+				Self::into_128(seller_order.remained_buy_amount)? * T::PriceFactor::get() / maker_order.price.into();
+            if Self::into_128(buyer_order.remained_buy_amount)? < quote_qty {
+                seller_order_filled = false;
+            }
+        } else {
+			let mut base_qty: u128 = 
+				Self::into_128(buyer_order.remained_buy_amount)? * maker_order.price.into() / T::PriceFactor::get();
+            if Self::into_128(seller_order.remained_buy_amount)? >= base_qty {
+                seller_order_filled = false;
+            }
+        }
+
+		// if seller_order.remained_buy_amount <= buyer_order.remained_sell_amount { // seller_order is Filled
+        if seller_order_filled {
 			let mut quote_qty: u128 = 
 				Self::into_128(seller_order.remained_buy_amount)? * T::PriceFactor::get() / maker_order.price.into();
 			let buy_amount_v2 = quote_qty * Self::into_128(maker_order.price)? / T::PriceFactor::get();
@@ -795,7 +811,7 @@ impl<T: Trait> Module<T> {
 				seller_order.remained_buy_amount, 
 				Self::from_128(quote_qty)?
 			))
-		} else if buyer_order.remained_buy_amount <= seller_order.remained_sell_amount { // buyer_order is Filled
+		} else { // buyer_order is Filled
 			let mut base_qty: u128 = 
 				Self::into_128(buyer_order.remained_buy_amount)? * maker_order.price.into() / T::PriceFactor::get();
 			let buy_amount_v2 = base_qty * T::PriceFactor::get() / maker_order.price.into();
@@ -824,9 +840,6 @@ impl<T: Trait> Module<T> {
 				buyer_order.remained_buy_amount
 			))
 		}
-
-		// should never executed here
-        unimplemented!()
 	}
 
 	fn next_match_price(item: &OrderLinkedItem<T>, otype: OrderType) -> Option<T::Price> {
