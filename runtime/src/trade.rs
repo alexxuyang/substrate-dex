@@ -1,14 +1,17 @@
-use support::{decl_module, decl_storage, decl_event, StorageValue, StorageMap, dispatch::Result, ensure, Parameter, traits::{Get}};
-use sr_primitives::traits::{SimpleArithmetic, Bounded, Member, Zero, CheckedSub, Hash};
-use primitives::{U256};
+use sp_std::if_std;
+use frame_support::{decl_module, decl_storage, decl_event, decl_error, StorageValue, StorageMap, ensure, Parameter, dispatch, traits::{Get, Randomness}};
+use sp_runtime::{traits::{SimpleArithmetic, Bounded, Member, Zero, CheckedSub, Hash}};
+use sp_core::{U256};
+use sp_std::{prelude::*, result, ops::Not};
+use core::convert::{TryInto, TryFrom};
+
 use system::ensure_signed;
 use codec::{Encode, Decode};
-use rstd::{prelude::*, result, ops::Not};
-use core::convert::{TryInto, TryFrom};
 use byteorder::{ByteOrder, LittleEndian};
 
 use crate::token;
 use crate::types;
+use crate::utils;
 
 pub trait Trait: token::Trait + system::Trait {
 	type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
@@ -31,8 +34,7 @@ pub struct TradePair<T> where T: Trait {
 	one_day_lowest_price: Option<T::Price>,
 }
 
-#[derive(Encode, Decode, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "std", derive(Debug))]
+#[derive(Encode, Decode, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrderType {
 	Buy,
 	Sell,
@@ -61,17 +63,17 @@ pub enum OrderStatus {
 #[derive(Encode, Decode, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "std", derive(Debug))]
 pub struct LimitOrder<T> where T: Trait {
-	hash: T::Hash,
-	base: T::Hash,
-	quote: T::Hash,
-	owner: T::AccountId,
-	price: T::Price,
-	sell_amount: T::Balance,
-	buy_amount: T::Balance,
-	remained_sell_amount: T::Balance,
-	remained_buy_amount: T::Balance,
-	otype: OrderType,
-	status: OrderStatus,
+	pub hash: T::Hash,
+	pub base: T::Hash,
+	pub quote: T::Hash,
+	pub owner: T::AccountId,
+	pub price: T::Price,
+	pub sell_amount: T::Balance,
+	pub buy_amount: T::Balance,
+	pub remained_sell_amount: T::Balance,
+	pub remained_buy_amount: T::Balance,
+	pub otype: OrderType,
+	pub status: OrderStatus,
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq)]
@@ -95,7 +97,8 @@ impl<T> LimitOrder<T> where T: Trait {
 		buy_amount: T::Balance, otype: OrderType) -> Self {
 		let nonce = Nonce::get();
 
-		let hash = (<system::Module<T>>::random_seed(), 
+        let random_seed = <randomness_collective_flip::Module<T>>::random_seed();
+		let hash = (random_seed, 
 					<system::Module<T>>::block_number(), 
 					base, quote, owner.clone(), price, sell_amount, buy_amount, otype, nonce)
 			.using_encoded(<T as system::Trait>::Hashing::hash);
@@ -111,6 +114,12 @@ impl<T> LimitOrder<T> where T: Trait {
 	pub fn is_finished(&self) -> bool {
 		(self.remained_buy_amount == Zero::zero() && self.status == OrderStatus::Filled) || self.status == OrderStatus::Canceled
 	}
+
+    pub fn debug_log(&self) {
+        if_std! {
+            eprintln!("[order]: Base[0x{:02x}], Quote[0x{:02x}], Hash[0x{:02x}], Owner[{:#?}], Price[{:#?}], Type[{:#?}], Status[{:#?}], SellAmount[{:#?}], RemainedSellAmount[{:#?}], BuyAmount[{:#?}], RemainBuyAmount[{:#?}]", utils::ByteBuf(self.base.as_ref()), utils::ByteBuf(self.quote.as_ref()), utils::ByteBuf(self.hash.as_ref()), self.owner, self.price, self.otype, self.status, self.sell_amount, self.remained_sell_amount, self.buy_amount, self.remained_buy_amount);
+        }
+    }
 }
 
 impl<T> Trade<T> where T: Trait {
@@ -118,7 +127,8 @@ impl<T> Trade<T> where T: Trait {
 		base_amount: T::Balance, quote_amount: T::Balance) -> Self {
 		let nonce = Nonce::get();
 
-		let hash = (<system::Module<T>>::random_seed(), <system::Module<T>>::block_number(), nonce,
+        let random_seed = <randomness_collective_flip::Module<T>>::random_seed();
+		let hash = (random_seed, <system::Module<T>>::block_number(), nonce,
 					maker_order.hash, maker_order.remained_sell_amount, maker_order.owner.clone(),
 					taker_order.hash, taker_order.remained_sell_amount, taker_order.owner.clone())
 			.using_encoded(<T as system::Trait>::Hashing::hash);
@@ -143,64 +153,111 @@ impl<T> Trade<T> where T: Trait {
 			price: maker_order.price,
 		}
 	}
+
+    pub fn debug_log(&self) {
+        if_std! {
+            eprintln!("[trade]: Base[0x{:02x}], Quote[0x{:02x}], Hash[0x{:02x}], buyer[{:#?}], seller[{:#?}], maker[{:#?}], taker[{:#?}], Type[{:#?}], price[{:#?}], base_amout[{:#?}], quote_amout[{:#?}]", utils::ByteBuf(self.base.as_ref()), utils::ByteBuf(self.quote.as_ref()), utils::ByteBuf(self.hash.as_ref()), self.buyer, self.seller, self.maker, self.taker, self.otype, self.price, self.base_amount, self.quote_amount);
+        }
+
+    }
 }
 
 type OrderLinkedItem<T> = types::LinkedItem<<T as system::Trait>::Hash, <T as Trait>::Price, <T as balances::Trait>::Balance>;
 type OrderLinkedItemList<T> = types::LinkedList<T, LinkedItemList<T>, <T as system::Trait>::Hash, <T as Trait>::Price, <T as balances::Trait>::Balance>;
 
+decl_error! {
+	/// Error for the trade module.
+	pub enum Error for Module<T: Trait> {
+		/// Price bounds check failed
+		BoundsCheckFailed,
+		/// Price length check failed
+		PriceLengthCheckFailed,
+		/// Number cast error
+		NumberCastError,
+		/// Overflow error
+		OverflowError,
+        /// No matching trade pair
+        NoMatchingTradePair,
+        /// Base equals to quote
+        BaseEqualQuote,
+        /// Token owner not found
+        TokenOwnerNotFound,
+        /// Sender not equal to base or quote owner
+        SenderNotEqualToBaseOrQuoteOwner,
+        /// Same trade pair with the given base and quote was already exist
+        TradePairExisted,
+        /// Get price error
+        OrderMatchGetPriceError,
+        /// Get linked list item error
+        OrderMatchGetLinkedListItemError,
+        /// Get order error
+        OrderMatchGetOrderError,
+        /// Order match substract error
+        OrderMatchSubstractError,
+        /// Order match order is not finish
+        OrderMatchOrderIsNotFinished,
+        /// No matching order
+        NoMatchingOrder,
+        /// Can only cancel own order
+        CanOnlyCancelOwnOrder,
+        /// can only cancel not finished order
+        CanOnlyCancelNotFinishedOrder,
+	}
+}
+
 decl_storage! {
 	trait Store for Module<T: Trait> as TradeModule {
 		///	TradePairHash => TradePair
-		TradePairs get(trade_pair): map T::Hash => Option<TradePair<T>>;
+		TradePairs get(fn trade_pair): map T::Hash => Option<TradePair<T>>;
 		/// (BaseTokenHash, quoteTokenHash) => TradePairHash
-		TradePairsHashByBaseQuote get(trade_pair_hash_by_base_quote): map (T::Hash, T::Hash) => Option<T::Hash>;
+		TradePairsHashByBaseQuote get(fn trade_pair_hash_by_base_quote): map (T::Hash, T::Hash) => Option<T::Hash>;
 		/// Index => TradePairHash
-		TradePairsHashByIndex get(trade_pair_hash_by_index): map u32 => Option<T::Hash>;
+		TradePairsHashByIndex get(fn trade_pair_hash_by_index): map u32 => Option<T::Hash>;
 		/// Index
-		TradePairsIndex get(trade_pair_index): u32;
+		TradePairsIndex get(fn trade_pair_index): u32;
 
 		/// OrderHash => Order
-		Orders get(order): map T::Hash => Option<LimitOrder<T>>;
+		Orders get(fn order): map T::Hash => Option<LimitOrder<T>>;
 		/// (AccoundId, Index) => OrderHash
-		OwnedOrders get(owned_order): map (T::AccountId, u64) => Option<T::Hash>;
+		OwnedOrders get(fn owned_order): map (T::AccountId, u64) => Option<T::Hash>;
 		///	AccountId => Index
-		OwnedOrdersIndex get(owned_orders_index): map T::AccountId => u64;
+		OwnedOrdersIndex get(fn owned_orders_index): map T::AccountId => u64;
 		/// (OrderHash, u64) => TradeHash
-		OrderOwnedTrades get(order_owned_trades): map (T::Hash, u64) => Option<T::Hash>;
+		OrderOwnedTrades get(fn order_owned_trades): map (T::Hash, u64) => Option<T::Hash>;
 		/// (OrderHash, u64) => TradeHash
-		OrderOwnedTradesIndex get(order_owned_trades_index): map T::Hash => u64;
+		OrderOwnedTradesIndex get(fn order_owned_trades_index): map T::Hash => u64;
 
 		/// (TradePairHash, Index) => OrderHash
-		TradePairOwnedOrders get(trade_pair_owned_order): map (T::Hash, u64) => Option<T::Hash>;
+		TradePairOwnedOrders get(fn trade_pair_owned_order): map (T::Hash, u64) => Option<T::Hash>;
 		/// TradePairHash => Index
-		TradePairOwnedOrdersIndex get(trade_pair_owned_order_index): map T::Hash => u64;
+		TradePairOwnedOrdersIndex get(fn trade_pair_owned_order_index): map T::Hash => u64;
 
 		/// (TradePairHash, Price) => LinkedItem
-		LinkedItemList get(linked_item): map (T::Hash, Option<T::Price>) => Option<OrderLinkedItem<T>>;
+		LinkedItemList get(fn linked_item): map (T::Hash, Option<T::Price>) => Option<OrderLinkedItem<T>>;
 
 		/// TradeHash => Trade
-		Trades get(trade): map T::Hash => Option<Trade<T>>;
+		Trades get(fn trade): map T::Hash => Option<Trade<T>>;
 
 		/// (AccountId, u64) => TradeHash
-		OwnedTrades get(owned_trades): map (T::AccountId, u64) => Option<T::Hash>;
+		OwnedTrades get(fn owned_trades): map (T::AccountId, u64) => Option<T::Hash>;
 		/// AccountId => u64
-		OwnedTradesIndex get(owned_trades_index): map T::AccountId => u64;
+		OwnedTradesIndex get(fn owned_trades_index): map T::AccountId => u64;
 
 		/// (AccountId, TradePairHash, u64) => TradeHash
-		OwnedTPTrades get(owned_tp_trades): map (T::AccountId, T::Hash, u64) => Option<T::Hash>;
+		OwnedTPTrades get(fn owned_tp_trades): map (T::AccountId, T::Hash, u64) => Option<T::Hash>;
 		/// (AccountId, TradePairHash) => u64
-		OwnedTPTradesIndex get(owned_tp_trades_index): map (T::AccountId, T::Hash) => u64;
+		OwnedTPTradesIndex get(fn owned_tp_trades_index): map (T::AccountId, T::Hash) => u64;
 
 		/// (TradePairHash, u64) => TradeHash
-		TradePairOwnedTrades get(trade_pair_owned_trades): map (T::Hash, u64) => Option<T::Hash>;
+		TradePairOwnedTrades get(fn trade_pair_owned_trades): map (T::Hash, u64) => Option<T::Hash>;
 		/// TradePairHash => u64
-		TradePairOwnedTradesIndex get(trade_pair_owned_trades_index): map T::Hash => u64;
+		TradePairOwnedTradesIndex get(fn trade_pair_owned_trades_index): map T::Hash => u64;
 
 		/// (TradePairHash, BlockNumber) => (Sum_of_Trade_Volume, Highest_Price, Lowest_Price)
-		TPTradeDataBucket get(trade_pair_trade_data_bucket): map (T::Hash, T::BlockNumber) => (T::Balance, Option<T::Price>, Option<T::Price>);
+		TPTradeDataBucket get(fn trade_pair_trade_data_bucket): map (T::Hash, T::BlockNumber) => (T::Balance, Option<T::Price>, Option<T::Price>);
 		/// store the trade pair's H/L price within last day
 		/// TradePairHash => (Vec<Highest_Price>, Vec<Lowest_Price>)
-		TPTradePriceBucket get(trade_pair_trade_price_bucket): map T::Hash => (Vec<Option<T::Price>>, Vec<Option<T::Price>>);
+		TPTradePriceBucket get(fn trade_pair_trade_price_bucket): map T::Hash => (Vec<Option<T::Price>>, Vec<Option<T::Price>>);
 
 		Nonce: u64;
 	}
@@ -264,26 +321,28 @@ decl_module! {
 	pub struct Module<T: Trait> for enum Call where origin: T::Origin {
 		fn deposit_event() = default;
 
-		pub fn create_trade_pair(origin, base: T::Hash, quote: T::Hash) -> Result {
+        type Error = Error<T>;
+
+		pub fn create_trade_pair(origin, base: T::Hash, quote: T::Hash) -> Result<(), dispatch::DispatchError> {
 			let sender = ensure_signed(origin)?;
 
 			Self::do_create_trade_pair(sender, base, quote)
 		}
 
-		pub fn create_limit_order(origin, base: T::Hash, quote: T::Hash, otype: OrderType, price: T::Price, sell_amount: T::Balance) -> Result {
+		pub fn create_limit_order(origin, base: T::Hash, quote: T::Hash, otype: OrderType, price: T::Price, sell_amount: T::Balance) -> Result<(), dispatch::DispatchError> {
 			let sender = ensure_signed(origin)?;
 
 			Self::do_create_limit_order(sender, base, quote, otype, price, sell_amount)
 		}
 
-		pub fn create_limit_order_with_le_float(origin, base: T::Hash, quote: T::Hash, otype: OrderType, price: Vec<u8>, sell_amount: T::Balance) -> Result {
+		pub fn create_limit_order_with_le_float(origin, base: T::Hash, quote: T::Hash, otype: OrderType, price: Vec<u8>, sell_amount: T::Balance) -> Result<(), dispatch::DispatchError> {
 			let sender = ensure_signed(origin)?;
 
 			let price = Self::price_as_vec_u8_to_x_by_100m(price)?;
 			Self::do_create_limit_order(sender, base, quote, otype, price, sell_amount)
 		}
 
-		pub fn cancel_limit_order(origin, order_hash: T::Hash) -> Result {
+		pub fn cancel_limit_order(origin, order_hash: T::Hash) -> Result<(), dispatch::DispatchError> {
 			let sender = ensure_signed(origin)?;
 
 			Self::do_cancel_limit_order(sender, order_hash)
@@ -365,28 +424,28 @@ decl_module! {
 }
 
 impl<T: Trait> Module<T> {
-	fn ensure_bounds(price: T::Price, sell_amount: T::Balance) -> Result {
-		ensure!(price > Zero::zero() && price <= T::Price::max_value(), "price bounds check failed");
-		ensure!(sell_amount > Zero::zero() && sell_amount <= T::Balance::max_value(), "sell amount bound check failed");
+	fn ensure_bounds(price: T::Price, sell_amount: T::Balance) -> dispatch::DispatchResult {
+		ensure!(price > Zero::zero() && price <= T::Price::max_value(), Error::<T>::BoundsCheckFailed);
+		ensure!(sell_amount > Zero::zero() && sell_amount <= T::Balance::max_value(), Error::<T>::BoundsCheckFailed);
 		Ok(())
 	}
 
-	fn price_as_vec_u8_to_x_by_100m(price: Vec<u8>) -> result::Result<T::Price, &'static str> {
+	fn price_as_vec_u8_to_x_by_100m(price: Vec<u8>) -> Result<T::Price, dispatch::DispatchError> {
 		
-		ensure!(price.len() >= 8, "price length is less than 8");
+		ensure!(price.len() >= 8, Error::<T>::PriceLengthCheckFailed);
 
 		let price = LittleEndian::read_f64(price.as_slice());
 
 		let price_v2 = (T::PriceFactor::get() as f64 * price) as u128;
 		let price_v3 = price_v2 as f64 / T::PriceFactor::get() as f64;
 
-		ensure!(price == price_v3, "price have more digits than required");
+		ensure!(price == price_v3, Error::<T>::PriceLengthCheckFailed);
 
-		TryFrom::try_from(price_v2).map_err(|_| "number cast error")
+		TryFrom::try_from(price_v2).map_err(|_| Error::<T>::NumberCastError.into())
 	}
 
 	fn ensure_counterparty_amount_bounds(otype: OrderType, price:T::Price, amount: T::Balance) 
-		-> result::Result<T::Balance, &'static str> {
+		-> result::Result<T::Balance, dispatch::DispatchError> {
 		
 		let price_u256 = U256::from(Self::into_128(price)?);
 		let amount_u256 = U256::from(Self::into_128(amount)?);
@@ -407,52 +466,48 @@ impl<T: Trait> Module<T> {
 			},
 		}
 
-		if amount_u256 != amount_v2 {
-			return Err("amount have digits parts")
-		}
-
-		if counterparty_amount == 0.into() || counterparty_amount > max_balance_u256 {
-			return Err("counterparty bound check failed")
-		}
+        ensure!(amount_u256 == amount_v2, Error::<T>::BoundsCheckFailed);
+        ensure!(counterparty_amount != 0.into() && counterparty_amount <= max_balance_u256, Error::<T>::BoundsCheckFailed);
 
 		// todo: change to u128
-		let result: u128 = counterparty_amount.try_into().map_err(|_| "Overflow error")?;
+		let result: u128 = counterparty_amount.try_into().map_err(|_| Error::<T>::OverflowError)?;
 
 		Self::from_128(result)
 	}
 
-	fn ensure_trade_pair(base: T::Hash, quote: T::Hash) -> result::Result<T::Hash, &'static str> {
+	fn ensure_trade_pair(base: T::Hash, quote: T::Hash) -> result::Result<T::Hash, dispatch::DispatchError> {
 		let bq = Self::trade_pair_hash_by_base_quote((base, quote));
-		ensure!(bq.is_some(), "not trade pair with base & quote");
+		ensure!(bq.is_some(), Error::<T>::NoMatchingTradePair);
 
 		match bq {
 			Some(bq) => Ok(bq),
-			None => Err("not trade pair with base & quote"),
+			None => Err(Error::<T>::NoMatchingTradePair.into()),
 		}
 	}
 
-	fn do_create_trade_pair(sender: T::AccountId, base: T::Hash, quote: T::Hash) -> Result {
+	fn do_create_trade_pair(sender: T::AccountId, base: T::Hash, quote: T::Hash) -> dispatch::DispatchResult {
 		
-		ensure!(base != quote, "base and quote can not be the same token");
+		ensure!(base != quote, Error::<T>::BaseEqualQuote);
 
 		let base_owner = <token::Module<T>>::owner(base);
 		let quote_owner = <token::Module<T>>::owner(quote);
 
-		ensure!(base_owner.is_some() && quote_owner.is_some(), "can't find owner of base or quote token");
+		ensure!(base_owner.is_some() && quote_owner.is_some(), Error::<T>::TokenOwnerNotFound);
 
 		let base_owner = base_owner.unwrap();
 		let quote_owner = quote_owner.unwrap();
 		
-		ensure!(sender == base_owner || sender == quote_owner, "sender should be equal to owner of base or quote token");
+		ensure!(sender == base_owner || sender == quote_owner, Error::<T>::SenderNotEqualToBaseOrQuoteOwner);
 
 		let bq = Self::trade_pair_hash_by_base_quote((base, quote));
 		let qb = Self::trade_pair_hash_by_base_quote((quote, base));
 
-		ensure!(!bq.is_some() && !qb.is_some(), "the same trade pair already exists");
+		ensure!(!bq.is_some() && !qb.is_some(), Error::<T>::TradePairExisted);
 
 		let nonce = Nonce::get();
 
-		let hash = (<system::Module<T>>::random_seed(), <system::Module<T>>::block_number(), sender.clone(), base, quote, nonce)
+		let random_seed = <randomness_collective_flip::Module<T>>::random_seed();
+        let hash = (random_seed, <system::Module<T>>::block_number(), sender.clone(), base, quote, nonce)
 			.using_encoded(<T as system::Trait>::Hashing::hash);
 
 		let tp = TradePair {
@@ -477,8 +532,12 @@ impl<T: Trait> Module<T> {
 	}
 
 	fn do_create_limit_order(sender: T::AccountId, base: T::Hash, quote: T::Hash, otype: OrderType, price: T::Price, 
-		sell_amount: T::Balance) -> Result {
+		sell_amount: T::Balance) -> dispatch::DispatchResult {
 		
+        if_std! {
+            eprintln!("create limit order begin");
+        }
+
 		Self::ensure_bounds(price, sell_amount)?;
 		let buy_amount = Self::ensure_counterparty_amount_bounds(otype, price, sell_amount)?;
 
@@ -498,6 +557,7 @@ impl<T: Trait> Module<T> {
 		Orders::insert(hash, order.clone());
 		Nonce::mutate(|n| *n += 1);
 		Self::deposit_event(RawEvent::OrderCreated(sender.clone(), base, quote, hash, order.clone()));
+        order.debug_log();
 
 		let owned_index = Self::owned_orders_index(sender.clone());
 		OwnedOrders::<T>::insert((sender.clone(), owned_index), hash);
@@ -513,12 +573,21 @@ impl<T: Trait> Module<T> {
 		// add order to the market order list
 		if !filled {
 			<OrderLinkedItemList<T>>::append(tp_hash, price, hash, order.remained_sell_amount, order.remained_buy_amount, otype);
+            Self::debug_log_market(tp_hash);
 		}
+
+        if_std! {
+            eprintln!("create limit order end");
+        }
 
 		Ok(())
 	}
 
-	fn order_match(tp_hash: T::Hash, order: &mut LimitOrder<T>) -> result::Result<bool, &'static str> {
+	fn order_match(tp_hash: T::Hash, order: &mut LimitOrder<T>) -> result::Result<bool, dispatch::DispatchError> {
+        if_std! {
+            eprintln!("order match begin");
+        }
+
 		let mut head = <OrderLinkedItemList<T>>::read_head(tp_hash);
 
 		let end_item_price;
@@ -531,7 +600,7 @@ impl<T: Trait> Module<T> {
 			end_item_price = Some(T::Price::max_value());
 		}
 
-		let tp = Self::trade_pair(tp_hash).ok_or("can not get trade pair")?;
+		let tp = Self::trade_pair(tp_hash).ok_or(Error::<T>::NoMatchingTradePair)?;
 		let give: T::Hash;
 		let have: T::Hash;
 
@@ -557,16 +626,16 @@ impl<T: Trait> Module<T> {
 				break;
 			}
 
-			let item_price = item_price.ok_or("can not unwrap item price")?;
+			let item_price = item_price.ok_or(Error::<T>::OrderMatchGetPriceError)?;
 
 			if !Self::price_matched(oprice, otype, item_price) {
 				break
 			}
 
-			let item = <LinkedItemList<T>>::get((tp_hash, Some(item_price))).ok_or("can not unwrap linked list item")?;
+			let item = <LinkedItemList<T>>::get((tp_hash, Some(item_price))).ok_or(Error::<T>::OrderMatchGetLinkedListItemError)?;
 			for o in item.orders.iter() {
 
-				let mut o = Self::order(o).ok_or("can not get order")?;
+				let mut o = Self::order(o).ok_or(Error::<T>::OrderMatchGetOrderError)?;
 
 				let (base_qty, quote_qty) = Self::calculate_ex_amount(&o, &order)?;
 
@@ -597,11 +666,11 @@ impl<T: Trait> Module<T> {
 				<token::Module<T>>::do_transfer(order.owner.clone(), give, o.owner.clone(), give_qty)?;
 				<token::Module<T>>::do_transfer(o.owner.clone(), have, order.owner.clone(), have_qty)?;
 
-				order.remained_sell_amount = order.remained_sell_amount.checked_sub(&give_qty).ok_or("substract error")?;
-				order.remained_buy_amount = order.remained_buy_amount.checked_sub(&have_qty).ok_or("substract error")?;
+				order.remained_sell_amount = order.remained_sell_amount.checked_sub(&give_qty).ok_or(Error::<T>::OrderMatchSubstractError)?;
+				order.remained_buy_amount = order.remained_buy_amount.checked_sub(&have_qty).ok_or(Error::<T>::OrderMatchSubstractError)?;
 
-				o.remained_sell_amount = o.remained_sell_amount.checked_sub(&have_qty).ok_or("substract error")?;
-				o.remained_buy_amount = o.remained_buy_amount.checked_sub(&give_qty).ok_or("substract error")?;
+				o.remained_sell_amount = o.remained_sell_amount.checked_sub(&have_qty).ok_or(Error::<T>::OrderMatchSubstractError)?;
+				o.remained_buy_amount = o.remained_buy_amount.checked_sub(&give_qty).ok_or(Error::<T>::OrderMatchSubstractError)?;
 
 				if order.remained_buy_amount == Zero::zero() {
 					order.status = OrderStatus::Filled;
@@ -610,7 +679,7 @@ impl<T: Trait> Module<T> {
 						order.remained_sell_amount = Zero::zero();
 					}
 
-					ensure!(order.is_finished(), "order is not finished");
+					ensure!(order.is_finished(), Error::<T>::OrderMatchOrderIsNotFinished);
 				}
 
 				if o.remained_buy_amount == Zero::zero() {
@@ -620,7 +689,7 @@ impl<T: Trait> Module<T> {
 						o.remained_sell_amount = Zero::zero();
 					}
 
-					ensure!(o.is_finished(), "order is not finished");
+					ensure!(o.is_finished(), Error::<T>::OrderMatchOrderIsNotFinished);
 				}
 
 				Orders::insert(order.hash.clone(), order.clone());
@@ -640,6 +709,11 @@ impl<T: Trait> Module<T> {
 				Trades::insert(trade.hash, trade.clone());
 
 		        Self::deposit_event(RawEvent::TradeCreated(order.owner.clone(), tp.base, tp.quote, trade.hash, trade.clone()));
+
+                order.debug_log();
+                o.debug_log();
+                trade.debug_log();
+                Self::debug_log_market(tp_hash);
 
 				// save trade reference data to store
 				<OrderOwnedTrades<T>>::add_trade(order.hash, trade.hash);
@@ -661,6 +735,10 @@ impl<T: Trait> Module<T> {
 			head = <OrderLinkedItemList<T>>::read_head(tp_hash);
 		}
 
+        if_std! {
+            eprintln!("order match end");
+        }
+
 		if order.status == OrderStatus::Filled {
 			Ok(true)
 		} else {
@@ -668,15 +746,15 @@ impl<T: Trait> Module<T> {
 		}
 	}
 
-	fn into_128<A: TryInto<u128>>(i: A) -> result::Result<u128, &'static str> {
-		TryInto::<u128>::try_into(i).map_err(|_| "number cast error")
+	fn into_128<A: TryInto<u128>>(i: A) -> Result<u128, dispatch::DispatchError> {
+		TryInto::<u128>::try_into(i).map_err(|_| Error::<T>::NumberCastError.into())
 	}
 
-	fn from_128<A: TryFrom<u128>>(i: u128) -> result::Result<A, &'static str> {
-		TryFrom::<u128>::try_from(i).map_err(|_| "number cast error")
+	fn from_128<A: TryFrom<u128>>(i: u128) -> Result<A, dispatch::DispatchError> {
+		TryFrom::<u128>::try_from(i).map_err(|_| Error::<T>::NumberCastError.into())
 	}
 
-	fn calculate_ex_amount(maker_order: &LimitOrder<T>, taker_order: &LimitOrder<T>) -> result::Result<(T::Balance, T::Balance), &'static str> {
+	fn calculate_ex_amount(maker_order: &LimitOrder<T>, taker_order: &LimitOrder<T>) -> result::Result<(T::Balance, T::Balance), dispatch::DispatchError> {
 		let buyer_order;
 		let seller_order;
 		if taker_order.otype == OrderType::Buy {
@@ -686,29 +764,75 @@ impl<T: Trait> Module<T> {
 			buyer_order = maker_order;
 			seller_order = taker_order;
 		}
-
+        
 		// todo: overflow checked need
 		// todo: optimization need, 
+        let mut seller_order_filled = true;
 		if seller_order.remained_buy_amount <= buyer_order.remained_sell_amount { // seller_order is Filled
+			let quote_qty: u128 = 
+				Self::into_128(seller_order.remained_buy_amount)? * T::PriceFactor::get() / maker_order.price.into();
+            if Self::into_128(buyer_order.remained_buy_amount)? < quote_qty {
+                seller_order_filled = false;
+            }
+        } else {
+			let base_qty: u128 = 
+				Self::into_128(buyer_order.remained_buy_amount)? * maker_order.price.into() / T::PriceFactor::get();
+            if Self::into_128(seller_order.remained_buy_amount)? >= base_qty {
+                seller_order_filled = false;
+            }
+        }
+
+		// if seller_order.remained_buy_amount <= buyer_order.remained_sell_amount { // seller_order is Filled
+        if seller_order_filled {
 			let mut quote_qty: u128 = 
 				Self::into_128(seller_order.remained_buy_amount)? * T::PriceFactor::get() / maker_order.price.into();
 			let buy_amount_v2 = quote_qty * Self::into_128(maker_order.price)? / T::PriceFactor::get();
-			if buy_amount_v2 != Self::into_128(seller_order.remained_buy_amount)? { // have fraction, seller(Filled) give more to align
+			if buy_amount_v2 != Self::into_128(seller_order.remained_buy_amount)? && 
+                Self::into_128(buyer_order.remained_buy_amount)? > quote_qty // have fraction, seller(Filled) give more to align
+            {
 				quote_qty = quote_qty + 1;
 			}
+
+            if_std! {
+                // let qty = Self::into_128(1)? * quote_qty.into();
+                eprintln!("1, calculate exchange amount");
+                // eprintln!("match price is: {:#?}", Self::into_128(1)? * maker_order.price.into());
+                eprintln!("match price is: {:#?}", maker_order.price);
+                eprintln!("seller order give amount (seller_order.remain_buy_amount): {:#?}", seller_order.remained_buy_amount);
+                eprintln!("buy order give amount: {:#?}", quote_qty);
+                eprintln!("maker order: ");
+                maker_order.debug_log();
+                eprintln!("taker order: ");
+                taker_order.debug_log();
+            }
 
 			return Ok
 			((
 				seller_order.remained_buy_amount, 
 				Self::from_128(quote_qty)?
 			))
-		} else if buyer_order.remained_buy_amount <= seller_order.remained_sell_amount { // buyer_order is Filled
+		} else { // buyer_order is Filled
 			let mut base_qty: u128 = 
 				Self::into_128(buyer_order.remained_buy_amount)? * maker_order.price.into() / T::PriceFactor::get();
 			let buy_amount_v2 = base_qty * T::PriceFactor::get() / maker_order.price.into();
-			if buy_amount_v2 != Self::into_128(buyer_order.remained_buy_amount)? { // have fraction, buyer(Filled) give more to align
+			if buy_amount_v2 != Self::into_128(buyer_order.remained_buy_amount)? &&
+                Self::into_128(seller_order.remained_buy_amount)? > base_qty // have fraction, buyer(Filled) give more to align
+            {
 				base_qty = base_qty + 1;
 			}
+
+            if_std! {
+                // let qty = Self::into_128(1)? * base_qty.into();
+                eprintln!("2, calculate exchange amount");
+                // eprintln!("match price is: {:#?}", Self::into_128(1)? * maker_order.price.into());
+                eprintln!("match price is: {:#?}", maker_order.price);
+                eprintln!("seller order give amount : {:#?}", base_qty);
+                eprintln!("buy order give amount (buyer_order.remain_buy_amount): {:#?}", buyer_order.remained_buy_amount);
+                eprintln!("maker order: ");
+                maker_order.debug_log();
+                eprintln!("taker order: ");
+                taker_order.debug_log();
+            }
 
 			return Ok
 			((
@@ -716,9 +840,6 @@ impl<T: Trait> Module<T> {
 				buyer_order.remained_buy_amount
 			))
 		}
-
-		// should never executed here
-		return Err("should never executed here")
 	}
 
 	fn next_match_price(item: &OrderLinkedItem<T>, otype: OrderType) -> Option<T::Price> {
@@ -736,9 +857,9 @@ impl<T: Trait> Module<T> {
 		}
 	}
 
-	pub fn set_tp_market_data(tp_hash: T::Hash, price: T::Price, amount: T::Balance) -> Result {
+	pub fn set_tp_market_data(tp_hash: T::Hash, price: T::Price, amount: T::Balance) -> dispatch::DispatchResult {
 
-		let mut tp = <TradePairs<T>>::get(tp_hash).ok_or("can not get trade pair")?;
+		let mut tp = <TradePairs<T>>::get(tp_hash).ok_or(Error::<T>::NoMatchingTradePair)?;
 		
 		tp.latest_matched_price = Some(price);
 		
@@ -773,12 +894,17 @@ impl<T: Trait> Module<T> {
 		Ok(())
 	}
 
-	fn do_cancel_limit_order(sender: T::AccountId, order_hash: T::Hash) -> Result {
-		let mut order = Self::order(order_hash).ok_or("can not get order")?;
+	fn do_cancel_limit_order(sender: T::AccountId, order_hash: T::Hash) -> dispatch::DispatchResult {
+        if_std! {
+            eprintln!("cancel limit order begin");
+            eprintln!("[order]: hash[0x{:02x}]", utils::ByteBuf(order_hash.as_ref()));
+        }
 
-		ensure!(order.owner == sender, "can only cancel your owned order");
+		let mut order = Self::order(order_hash).ok_or(Error::<T>::NoMatchingOrder)?;
 
-		ensure!(!order.is_finished(), "can not cancel finished order");
+		ensure!(order.owner == sender, Error::<T>::CanOnlyCancelOwnOrder);
+
+		ensure!(!order.is_finished(), Error::<T>::CanOnlyCancelNotFinishedOrder);
 
 		let tp_hash = Self::ensure_trade_pair(order.base, order.quote)?;
 
@@ -786,6 +912,9 @@ impl<T: Trait> Module<T> {
 
 		order.status = OrderStatus::Canceled;
 		<Orders<T>>::insert(order_hash, order.clone());
+
+        order.debug_log();
+        Self::debug_log_market(tp_hash);
 
         let sell_hash = match order.otype {
             OrderType::Buy => order.base,
@@ -796,113 +925,139 @@ impl<T: Trait> Module<T> {
 
 		Self::deposit_event(RawEvent::OrderCanceled(sender, order_hash));
 
+        if_std! {
+            eprintln!("cancel limit order end");
+        }
+
 		Ok(())
+	}
+
+	fn debug_log_market(tp_hash: T::Hash) {
+        if_std! {
+            let mut item = <OrderLinkedItemList<T>>::read_bottom(tp_hash);
+
+            eprintln!("[Market Orders]");
+
+            loop {
+                if item.price == Some(T::Price::min_value()) {
+                    eprint!("Bottom ==> ");
+                } else if item.price == Some(T::Price::max_value()) {
+                    eprint!("Top ==> ");
+                } else if item.price == None {
+                    eprint!("Head ==> ");
+                }
+
+                eprint!("Price({:?}), Next({:?}), Prev({:?}), Sell_Amount({:?}), Buy_Amount({:?}), Orders({}): ", 
+                    item.price, item.next, item.prev, item.sell_amount, item.buy_amount, item.orders.len());
+
+                let mut orders = item.orders.iter();
+                loop {
+                    match orders.next() {
+                        Some(order_hash) => {
+                            let order = <Orders<T>>::get(order_hash).unwrap();
+                            eprint!("({}@[{:?}]: Sell[{:?}, {:?}], Buy[{:?}, {:?}]), ", order.hash, order.status, 
+                                order.sell_amount, order.remained_sell_amount, order.buy_amount, order.remained_buy_amount);
+                        },
+                        None => break,
+                    }
+                }
+
+                eprintln!("");
+
+                if item.next == Some(T::Price::min_value()) {
+                    break;
+                } else {
+                    item = OrderLinkedItemList::<T>::read(tp_hash, item.next);
+                }
+            }
+
+            eprintln!("[Market Trades]");
+
+            let index_end = Self::trade_pair_owned_trades_index(tp_hash);
+            for i in 0..index_end {
+                let hash = Self::trade_pair_owned_trades((tp_hash, i));
+                if let Some(hash) = hash {
+                    let trade = <Trades<T>>::get(hash).unwrap();
+                    eprintln!("[{}/{}] - {}@{:?}[{:?}]: [Buyer,Seller][{},{}], [Maker,Taker][{},{}], [Base,Quote][{:?}, {:?}]", 
+                        trade.quote, trade.base, hash, trade.price, trade.otype, trade.buyer, trade.seller, trade.maker, 
+                        trade.taker, trade.base_amount, trade.quote_amount);
+                }
+            }
+
+            eprintln!("[Trade Pair Data]");
+            let tp = Self::trade_pair(tp_hash).unwrap();
+            eprintln!("latest matched price: {:?}", tp.latest_matched_price);
+
+            eprintln!();
+        }
 	}
 }
 
-/// tests for this module
 #[cfg(test)]
 mod tests {
 	use super::*;
 
-	use primitives::{Blake2Hasher, H256};
-	use runtime_io::with_externalities;
-	use sr_primitives::weights::Weight;
-	use sr_primitives::Perbill;
-	use sr_primitives::{
-		testing::Header,
-		traits::{BlakeTwo256, IdentityLookup, OnInitialize, OnFinalize}
+	use frame_support::{assert_ok, assert_err, impl_outer_origin, parameter_types, weights::Weight};
+	use sp_core::H256;
+	use sp_runtime::{
+		traits::{BlakeTwo256, OnFinalize, OnInitialize, IdentityLookup}, testing::Header, Perbill
 	};
-    use std::cell::RefCell;
-    use support::{assert_err, assert_ok, impl_outer_origin, parameter_types, traits::Get};
 
 	impl_outer_origin! {
 		pub enum Origin for Test {}
 	}
 
-	// For testing the module, we construct most of a mock runtime. This means
-	// first constructing a configuration type (`Test`) which `impl`s each of the
-	// configuration traits of modules we want to use.
-	#[derive(Clone, Eq, PartialEq, Debug)]
+	#[derive(Clone, Eq, Debug, PartialEq)]
 	pub struct Test;
+
 	parameter_types! {
 		pub const BlockHashCount: u64 = 250;
 		pub const MaximumBlockWeight: Weight = 1024;
 		pub const MaximumBlockLength: u32 = 2 * 1024;
-		pub const AvailableBlockRatio: Perbill = Perbill::from_percent(75);
-		pub const BalancesTransactionBaseFee: u64 = 0;
-		pub const BalancesTransactionByteFee: u64 = 0;
-		pub const PriceFactor: u128 = 100_000_000;
-		pub const BlocksPerDay: u32 = 10;
+		pub const AvailableBlockRatio: Perbill = Perbill::one();
 	}
 
 	impl system::Trait for Test {
 		type Origin = Origin;
-		type Call = ();
 		type Index = u64;
 		type BlockNumber = u64;
+		type Call = ();
 		type Hash = H256;
 		type Hashing = BlakeTwo256;
 		type AccountId = u64;
 		type Lookup = IdentityLookup<Self::AccountId>;
 		type Header = Header;
-		type WeightMultiplierUpdate = ();
 		type Event = ();
 		type BlockHashCount = BlockHashCount;
 		type MaximumBlockWeight = MaximumBlockWeight;
-		type MaximumBlockLength = MaximumBlockLength;
 		type AvailableBlockRatio = AvailableBlockRatio;
+		type MaximumBlockLength = MaximumBlockLength;
 		type Version = ();
+		type ModuleToIndex = ();
 	}
 
-    thread_local! {
-        static EXISTENTIAL_DEPOSIT: RefCell<u128> = RefCell::new(0);
-        static TRANSFER_FEE: RefCell<u128> = RefCell::new(0);
-        static CREATION_FEE: RefCell<u128> = RefCell::new(0);
-        static BLOCK_GAS_LIMIT: RefCell<u128> = RefCell::new(0);
-    }
+	parameter_types! {
+		pub const ExistentialDeposit: u64 = 1;
+		pub const TransferFee: u64 = 0;
+		pub const CreationFee: u64 = 0;
+	}
 
-    pub struct ExistentialDeposit;
-    impl Get<u128> for ExistentialDeposit {
-        fn get() -> u128 {
-            EXISTENTIAL_DEPOSIT.with(|v| *v.borrow())
-        }
-    }
+	impl balances::Trait for Test {
+		type Balance = u128;
+		type OnNewAccount = ();
+		type OnFreeBalanceZero = ();
+		type Event = ();
+		type TransferPayment = ();
+		type DustRemoval = ();
+		type ExistentialDeposit = ExistentialDeposit;
+		type TransferFee = TransferFee;
+		type CreationFee = CreationFee;
+	}
 
-    pub struct TransferFee;
-    impl Get<u128> for TransferFee {
-        fn get() -> u128 {
-            TRANSFER_FEE.with(|v| *v.borrow())
-        }
-    }
-
-    pub struct CreationFee;
-    impl Get<u128> for CreationFee {
-        fn get() -> u128 {
-            CREATION_FEE.with(|v| *v.borrow())
-        }
-    }
-
-    impl balances::Trait for Test {
-        type Balance = u128;
-
-        type OnFreeBalanceZero = ();
-
-        type OnNewAccount = ();
-
-        type Event = ();
-
-        type TransactionPayment = ();
-        type DustRemoval = ();
-        type TransferPayment = ();
-
-        type ExistentialDeposit = ExistentialDeposit;
-        type TransferFee = TransferFee;
-        type CreationFee = CreationFee;
-        type TransactionBaseFee = BalancesTransactionBaseFee;
-        type TransactionByteFee = BalancesTransactionByteFee;
-        type WeightToFee = ();
-    }
+	parameter_types! {
+        pub const PriceFactor: u128 = 100_000_000;
+        pub const BlocksPerDay: u32 = 10;
+	}
 
 	impl token::Trait for Test {
 		type Event = ();
@@ -917,7 +1072,7 @@ mod tests {
 
 	// This function basically just builds a genesis storage key/value store according to
 	// our desired mockup.
-	fn new_test_ext() -> runtime_io::TestExternalities<Blake2Hasher> {
+	fn new_test_ext() -> sp_io::TestExternalities {
 		system::GenesisConfig::default()
 			.build_storage::<Test>()
 			.unwrap()
@@ -943,7 +1098,7 @@ mod tests {
 
 	#[test]
 	fn run_to_block_works() {
-		with_externalities(&mut new_test_ext(), || {
+        new_test_ext().execute_with(|| {
 			assert_eq!(System::block_number(), 1);
 			run_to_block(10);
 			assert_eq!(System::block_number(), 10);
@@ -1002,16 +1157,6 @@ mod tests {
 			}
 		}
 
-		// let trades = TradeModule::trade_pair_owned_trades(tp_hash);
-		// if let Some(trades) = trades {
-		// 	for hash in trades.iter() {
-		// 		let trade = <Trades<Test>>::get(hash).unwrap();
-		// 		println!("[{}/{}] - {}@{}[{:?}]: [Buyer,Seller][{},{}], [Maker,Taker][{},{}], [Base,Quote][{}, {}]", 
-		// 			trade.quote, trade.base, hash, trade.price, trade.otype, trade.buyer, trade.seller, trade.maker, 
-		// 			trade.taker, trade.base_amount, trade.quote_amount);
-		// 	}
-		// }
-
 		println!("[Trade Pair Data]");
 		let tp = TradeModule::trade_pair(tp_hash).unwrap();
 		println!("latest matched price: {:?}", tp.latest_matched_price);
@@ -1021,7 +1166,7 @@ mod tests {
 
 	#[test]
 	fn linked_list_test_case() {
-		with_externalities(&mut new_test_ext(), || {
+		new_test_ext().execute_with(|| {
 			let alice = 10;
 			let bob = 20;
 
@@ -1552,7 +1697,7 @@ mod tests {
 
 	#[test]
 	fn order_match_test_case() {
-		with_externalities(&mut new_test_ext(), || {
+		new_test_ext().execute_with(|| {
 			let alice = 10;
 			let bob = 20;
 
@@ -2237,7 +2382,7 @@ mod tests {
 
 	#[test]
 	fn order_cancel_test_case() {
-		with_externalities(&mut new_test_ext(), || {
+		new_test_ext().execute_with(|| {
 			let alice = 10;
 			let bob = 20;
 
@@ -2459,11 +2604,11 @@ mod tests {
 			let tmp_amount = order101.remained_buy_amount;
 			order101.remained_buy_amount = Zero::zero();
 			<Orders<Test>>::insert(order101.hash, order101.clone());
-			assert_err!(TradeModule::cancel_limit_order(Origin::signed(alice), order101.hash), "can not cancel finished order");
+			assert_err!(TradeModule::cancel_limit_order(Origin::signed(alice), order101.hash), Error::<Test>::CanOnlyCancelNotFinishedOrder);
 
-			assert_err!(TradeModule::cancel_limit_order(Origin::signed(alice), order1.hash), "can only cancel your owned order");
+			assert_err!(TradeModule::cancel_limit_order(Origin::signed(alice), order1.hash), Error::<Test>::CanOnlyCancelOwnOrder);
 
-			assert_err!(TradeModule::cancel_limit_order(Origin::signed(alice), H256::from_low_u64_be(0)), "can not get order");
+			assert_err!(TradeModule::cancel_limit_order(Origin::signed(alice), H256::from_low_u64_be(0)), Error::<Test>::NoMatchingOrder);
 
 			order101.status = OrderStatus::Created;
 			order101.remained_buy_amount = tmp_amount;
@@ -2572,7 +2717,7 @@ mod tests {
 
 	#[test]
 	fn order_match_calculation_test_case() {
-		with_externalities(&mut new_test_ext(), || {
+		new_test_ext().execute_with(|| {
 			let alice = 10;
 			let bob = 20;
 
@@ -2638,7 +2783,7 @@ mod tests {
 
 	#[test]
 	fn trade_pair_bucket_test_case() {
-		with_externalities(&mut new_test_ext(), || {
+		new_test_ext().execute_with(|| {
 			let alice = 10;
 			let bob = 20;
 
@@ -2755,9 +2900,73 @@ mod tests {
 
 	#[test]
 	fn calculate_ex_amount() {
-		with_externalities(&mut new_test_ext(), || {
+		new_test_ext().execute_with(|| {
 			let alice = 10;
 			let bob = 20;
+
+			let order1 = LimitOrder::<Test> {
+				hash: H256::from_low_u64_be(0),
+				base: H256::from_low_u64_be(0),
+				quote: H256::from_low_u64_be(0),
+				owner: alice,
+				price: TradeModule::from_128(390000000).unwrap(),
+				sell_amount: 3120,
+				remained_sell_amount: 1590,
+				buy_amount: 800,
+				remained_buy_amount: 300,
+				otype: OrderType::Buy,
+				status: OrderStatus::PartialFilled,
+			};
+
+			let order2 = LimitOrder::<Test> {
+				hash: H256::from_low_u64_be(0),
+				base: H256::from_low_u64_be(0),
+				quote: H256::from_low_u64_be(0),
+				owner: bob,
+				price: TradeModule::from_128(342000000).unwrap(),
+				sell_amount: 400,
+				remained_sell_amount: 400,
+				buy_amount: 1368,
+				remained_buy_amount: 1368,
+				otype: OrderType::Sell,
+				status: OrderStatus::Created,
+			};
+
+			let result = TradeModule::calculate_ex_amount(&order2, &order1).unwrap();
+			assert_eq!(result.0, 1026);
+			assert_eq!(result.1, 300);
+
+			let order1 = LimitOrder::<Test> {
+				hash: H256::from_low_u64_be(0),
+				base: H256::from_low_u64_be(0),
+				quote: H256::from_low_u64_be(0),
+				owner: alice,
+				price: TradeModule::from_128(390000000).unwrap(),
+				sell_amount: 1170,
+				remained_sell_amount: 594,
+				buy_amount: 300,
+				remained_buy_amount: 134,
+				otype: OrderType::Buy,
+				status: OrderStatus::PartialFilled,
+			};
+
+			let order2 = LimitOrder::<Test> {
+				hash: H256::from_low_u64_be(0),
+				base: H256::from_low_u64_be(0),
+				quote: H256::from_low_u64_be(0),
+				owner: bob,
+				price: TradeModule::from_128(369000000).unwrap(),
+				sell_amount: 1000,
+				remained_sell_amount: 200,
+				buy_amount: 3690,
+				remained_buy_amount: 498,
+				otype: OrderType::Sell,
+				status: OrderStatus::PartialFilled,
+			};
+
+			let result = TradeModule::calculate_ex_amount(&order2, &order1).unwrap();
+			assert_eq!(result.0, 498);
+			assert_eq!(result.1, 134);
 
 			let order1 = LimitOrder::<Test> {
 				hash: H256::from_low_u64_be(0),
@@ -2826,7 +3035,7 @@ mod tests {
 
 	#[test]
 	fn ensure_amount_zero_digits_test_case() {
-		with_externalities(&mut new_test_ext(), || {
+		new_test_ext().execute_with(|| {
 			assert_eq!(1, 1);
 
 			let price = TradeModule::from_128(25_010_000).unwrap();
@@ -2837,7 +3046,7 @@ mod tests {
 			let price = TradeModule::from_128(25_010_000).unwrap(); // 0.2501
 			let amount = TradeModule::from_128(2500).unwrap();
 			let otype = OrderType::Buy;
-			assert_err!(TradeModule::ensure_counterparty_amount_bounds(otype, price, amount), "amount have digits parts");
+			assert_err!(TradeModule::ensure_counterparty_amount_bounds(otype, price, amount), Error::<Test>::BoundsCheckFailed);
 
 			let price = TradeModule::from_128(25_000_000).unwrap(); // 0.25
 			let amount = TradeModule::from_128(24).unwrap();
@@ -2847,18 +3056,18 @@ mod tests {
 			let price = TradeModule::from_128(25_000_000).unwrap(); // 0.25
 			let amount = TradeModule::from_128(21).unwrap();
 			let otype = OrderType::Sell;
-			assert_err!(TradeModule::ensure_counterparty_amount_bounds(otype, price, amount), "amount have digits parts");
+			assert_err!(TradeModule::ensure_counterparty_amount_bounds(otype, price, amount), Error::<Test>::BoundsCheckFailed);
 
 			let price = TradeModule::from_128(200_000_000).unwrap(); // 2.0
 			let amount = TradeModule::from_128(u128::max_value() - 1).unwrap();
 			let otype = OrderType::Sell;
-			assert_err!(TradeModule::ensure_counterparty_amount_bounds(otype, price, amount), "counterparty bound check failed");
+			assert_err!(TradeModule::ensure_counterparty_amount_bounds(otype, price, amount), Error::<Test>::BoundsCheckFailed);
 		});
 	}
 
 	#[test]
 	fn price_as_vec_u8_to_x_by_100m_test_case() {
-		with_externalities(&mut new_test_ext(), || {
+		new_test_ext().execute_with(|| {
 			assert_eq!(1, 1);
 
 			let _price_v1 = 3.11122233f64;
@@ -2883,17 +3092,17 @@ mod tests {
 
 			let price_v1_vec_u8: [u8; 7] = [255, 142, 214, 136, 200, 227, 8];
 			assert_err!(TradeModule::price_as_vec_u8_to_x_by_100m(price_v1_vec_u8.to_vec()), 
-				"price length is less than 8");
+                Error::<Test>::PriceLengthCheckFailed);
 
 			let _price_v1 = 3.111222333f64;
 			let price_v1_vec_u8: [u8; 8] = [255, 142, 214, 136, 200, 227, 8, 64];
 			assert_err!(TradeModule::price_as_vec_u8_to_x_by_100m(price_v1_vec_u8.to_vec()), 
-				"price have more digits than required");
+                Error::<Test>::PriceLengthCheckFailed);
 
 			let _price_v1 = 3.000011112222f64;
 			let price_v1_vec_u8: [u8; 8] = [101, 10, 117, 211, 5, 0, 8, 64];
 			assert_err!(TradeModule::price_as_vec_u8_to_x_by_100m(price_v1_vec_u8.to_vec()), 
-				"price have more digits than required");
+                Error::<Test>::PriceLengthCheckFailed);
 		});
 	}
 }

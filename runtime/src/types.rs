@@ -1,9 +1,11 @@
-use codec::{Decode, Encode};
-use rstd::prelude::*;
-use sr_primitives::traits::{Bounded, Member, SimpleArithmetic};
-use support::{dispatch::Result, ensure, Parameter, StorageMap};
+use sp_std::if_std;
+use codec::{Decode, Encode, EncodeLike};
+use sp_std::prelude::*;
+use sp_runtime::{DispatchResult as Result, traits::{Bounded, Member, SimpleArithmetic}};
+use frame_support::{ensure, Parameter, StorageMap};
 
 use crate::trade::{self, *};
+use crate::utils;
 
 #[derive(Encode, Decode, Clone)]
 #[cfg_attr(feature = "std", derive(PartialEq, Eq, Debug))]
@@ -16,7 +18,7 @@ pub struct LinkedItem<K1, K2, K3> {
 	pub orders: Vec<K1>, // remove the item at 0 index will caused performance issue, should be optimized
 }
 
-pub struct LinkedList<T, S, K1, K2, K3>(rstd::marker::PhantomData<(T, S, K1, K2, K3)>);
+pub struct LinkedList<T, S, K1, K2, K3>(sp_std::marker::PhantomData<(T, S, K1, K2, K3)>);
 
 ///             LinkedItem          LinkedItem			LinkedItem          LinkedItem          LinkedItem
 ///             Bottom              Buy Order			Head                Sell Order          Top
@@ -24,11 +26,11 @@ pub struct LinkedList<T, S, K1, K2, K3>(rstd::marker::PhantomData<(T, S, K1, K2,
 ///   max <---- Prev				Next		---->	Price:None  <----   Prev                Next        ---->   Price: 0
 ///         	Price:0		<----   Prev     			Next        ---->   Price 10   <----    Prev
 ///                                 Orders									Orders
-///                                 o1: Hash -> buy 1@5						o101: Hash -> sell 100@10
-///                                 o2: Hash -> buy 5@5						o102: Hash -> sell 100@5000
-///                                 o3: Hash -> buy 100@5
-///                                 o4: Hash -> buy 40@5
-///                                 o5: Hash -> buy 1000@5
+///                                 o1: Hash -> buy 1@8						o101: Hash -> sell 100@10
+///                                 o2: Hash -> buy 5@8						o102: Hash -> sell 100@10
+///                                 o3: Hash -> buy 100@8
+///                                 o4: Hash -> buy 40@8
+///                                 o5: Hash -> buy 1000@8
 ///                                     
 /// when do order matching, o1 will match before o2 and so on
 
@@ -36,12 +38,14 @@ pub struct LinkedList<T, S, K1, K2, K3>(rstd::marker::PhantomData<(T, S, K1, K2,
 impl<T, S, K1, K2, K3> LinkedList<T, S, K1, K2, K3>
 where
 	T: trade::Trait,
-	K1: Encode
+	K1: EncodeLike 
+        + Encode
 		+ Decode
 		+ Clone
-		+ rstd::borrow::Borrow<<T as system::Trait>::Hash>
+		+ sp_std::borrow::Borrow<<T as system::Trait>::Hash>
 		+ Copy
-		+ PartialEq,
+		+ PartialEq
+        + AsRef<[u8]>,
 	K2: Parameter + Default + Member + Bounded + SimpleArithmetic + Copy,
 	K3: Parameter + Default + Member + Bounded + SimpleArithmetic + Copy,
 	S: StorageMap<(K1, Option<K2>), LinkedItem<K1, K2, K3>, Query = Option<LinkedItem<K1, K2, K3>>>,
@@ -99,6 +103,11 @@ where
 	}
 
 	pub fn append(key1: K1, key2: K2, value: K1, sell_amount: K3, buy_amount: K3, otype: OrderType) {
+        if_std! {
+            eprintln!("order book append item begin");
+            eprintln!("order book append item: tp_hash[0x{:02x}], price[{:#?}], order_hash[0x{:02x}], order_type:[{:#?}], sell_amount[{:#?}], buy_amount[{:#?}]", utils::ByteBuf(key1.as_ref()), key2, utils::ByteBuf(value.as_ref()), otype, sell_amount, buy_amount);
+        }
+
 		let item = S::get((key1, Some(key2)));
 		match item {
 			Some(mut item) => {
@@ -170,6 +179,10 @@ where
 				Self::write(key1, Some(key2), item);
 			}
 		};
+
+        if_std! {
+            eprintln!("order book append item end");
+        }
 	}
 
 	pub fn next_match_price(item: &LinkedItem<K1, K2, K3>, otype: OrderType) -> Option<K2> {
@@ -188,6 +201,10 @@ where
 	}
 
 	pub fn remove_all(key1: K1, otype: OrderType) {
+        if_std! {
+            eprintln!("order book remove all items begin");
+        }
+
 		let end_item;
 
 		if otype == OrderType::Buy {
@@ -211,9 +228,17 @@ where
 
 			head = Self::read_head(key1);
 		}
+
+        if_std! {
+            eprintln!("order book remove all items end");
+        }
 	}
 
 	pub fn remove_order(key1: K1, key2: K2, order_hash: K1, sell_amount: K3, buy_amount: K3) -> Result {
+        if_std! {
+            eprintln!("order book cancel order begin");
+        }
+
 		match S::get((key1, Some(key2))) {
 			Some(mut item) => {
 				ensure!(
@@ -226,6 +251,10 @@ where
 				item.sell_amount = item.sell_amount - sell_amount;
 				Self::write(key1, Some(key2), item.clone());
 
+                if_std! {
+                    eprintln!("order book cancel order: tp_hash[0x{:02x}], price[{:#?}], order_hash[0x{:02x}]", utils::ByteBuf(key1.as_ref()), key2, utils::ByteBuf(order_hash.as_ref()));
+                }
+
 				if item.orders.len() == 0 {
 					Self::remove_item(key1, key2);
 				}
@@ -233,10 +262,18 @@ where
 			None => {}
 		}
 
+        if_std! {
+            eprintln!("order book cancel order end");
+        }
+
 		Ok(())
 	}
 
 	pub fn remove_item(key1: K1, key2: K2) {
+        if_std! {
+            eprintln!("order book remove item begin");
+        }
+
 		if let Some(item) = S::take((key1, Some(key2))) {
 			S::mutate((key1.clone(), item.prev), |x| {
 				if let Some(x) = x {
@@ -249,11 +286,23 @@ where
 					x.prev = item.prev;
 				}
 			});
+
+            if_std! {
+                eprintln!("order book remove item: tp_hash[0x{:02x}], price[{:#?}]", utils::ByteBuf(key1.as_ref()), key2);
+            }
 		}
+
+        if_std! {
+            eprintln!("order book remove itme end");
+        }
 	}
 
 	// when the order is canceled, it should be remove from Sell / Buy orders
 	pub fn remove_orders_in_one_item(key1: K1, key2: K2) -> Result {
+        if_std! {
+            eprintln!("order book remove order begin");
+        }
+
 		match S::get((key1, Some(key2))) {
 			Some(mut item) => {
 				while item.orders.len() > 0 {
@@ -266,6 +315,10 @@ where
 					item.orders.remove(0);
 
 					Self::write(key1, Some(key2), item.clone());
+
+                    if_std! {
+                        eprintln!("order book remove order: tp_hash[0x{:02x}], order_hash[0x{:02x}], Owner[{:#?}], Type[{:#?}], Status[{:#?}], SellAmount[{:#?}], RemainedSellAmount[{:#?}], BuyAmount[{:#?}], RemainBuyAmount[{:#?}]", utils::ByteBuf(key1.as_ref()), utils::ByteBuf(order.hash.as_ref()), order.owner, order.otype, order.status, order.sell_amount, order.remained_sell_amount, order.buy_amount, order.remained_buy_amount);
+                    }
 				}
 
 				if item.orders.len() == 0 {
@@ -274,6 +327,10 @@ where
 			}
 			None => {}
 		}
+
+        if_std! {
+            eprintln!("order book remove order end");
+        }
 
 		Ok(())
 	}
