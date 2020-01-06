@@ -68,13 +68,13 @@ Then open the link [http://localhost:3000/#/?rpc=ws://127.0.0.1:9944](http://loc
 Test all the test cases by:
 
 ```Rust
-cargo test -p dex-v2-runtime -- --test-threads=1 --nocapture
+cargo test -p substrate-dex-runtime -- --test-threads=1 --nocapture
 ```
 
 Or you can just run one of the test cases by:
 
 ```Rust
-cargo test [TEST_CASE_NAME] -p dex-v2-runtime -- --test-threads=1 --nocapture
+cargo test [TEST_CASE_NAME] -p substrate-dex-runtime -- --test-threads=1 --nocapture
 ```
 
 ### About next step
