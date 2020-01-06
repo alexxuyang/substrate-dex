@@ -769,13 +769,13 @@ impl<T: Trait> Module<T> {
 		// todo: optimization need, 
         let mut seller_order_filled = true;
 		if seller_order.remained_buy_amount <= buyer_order.remained_sell_amount { // seller_order is Filled
-			let mut quote_qty: u128 = 
+			let quote_qty: u128 = 
 				Self::into_128(seller_order.remained_buy_amount)? * T::PriceFactor::get() / maker_order.price.into();
             if Self::into_128(buyer_order.remained_buy_amount)? < quote_qty {
                 seller_order_filled = false;
             }
         } else {
-			let mut base_qty: u128 = 
+			let base_qty: u128 = 
 				Self::into_128(buyer_order.remained_buy_amount)? * maker_order.price.into() / T::PriceFactor::get();
             if Self::into_128(seller_order.remained_buy_amount)? >= base_qty {
                 seller_order_filled = false;
@@ -2904,7 +2904,7 @@ mod tests {
 			let alice = 10;
 			let bob = 20;
 
-			let mut order1 = LimitOrder::<Test> {
+			let order1 = LimitOrder::<Test> {
 				hash: H256::from_low_u64_be(0),
 				base: H256::from_low_u64_be(0),
 				quote: H256::from_low_u64_be(0),
@@ -2918,7 +2918,7 @@ mod tests {
 				status: OrderStatus::PartialFilled,
 			};
 
-			let mut order2 = LimitOrder::<Test> {
+			let order2 = LimitOrder::<Test> {
 				hash: H256::from_low_u64_be(0),
 				base: H256::from_low_u64_be(0),
 				quote: H256::from_low_u64_be(0),
@@ -2936,7 +2936,7 @@ mod tests {
 			assert_eq!(result.0, 1026);
 			assert_eq!(result.1, 300);
 
-			let mut order1 = LimitOrder::<Test> {
+			let order1 = LimitOrder::<Test> {
 				hash: H256::from_low_u64_be(0),
 				base: H256::from_low_u64_be(0),
 				quote: H256::from_low_u64_be(0),
@@ -2950,7 +2950,7 @@ mod tests {
 				status: OrderStatus::PartialFilled,
 			};
 
-			let mut order2 = LimitOrder::<Test> {
+			let order2 = LimitOrder::<Test> {
 				hash: H256::from_low_u64_be(0),
 				base: H256::from_low_u64_be(0),
 				quote: H256::from_low_u64_be(0),
@@ -2968,7 +2968,7 @@ mod tests {
 			assert_eq!(result.0, 498);
 			assert_eq!(result.1, 134);
 
-			let mut order1 = LimitOrder::<Test> {
+			let order1 = LimitOrder::<Test> {
 				hash: H256::from_low_u64_be(0),
 				base: H256::from_low_u64_be(0),
 				quote: H256::from_low_u64_be(0),
