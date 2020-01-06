@@ -117,7 +117,7 @@ impl<T> LimitOrder<T> where T: Trait {
 
     pub fn debug_log(&self) {
         if_std! {
-            eprintln!("[order]: Base[0x{:02x}], Quote[0x{:02x}], order_hash[0x{:02x}], Owner[{:#?}], Type[{:#?}], Status[{:#?}], SellAmount[{:#?}], RemainedSellAmount[{:#?}], BuyAmount[{:#?}], RemainBuyAmount[{:#?}]", utils::ByteBuf(self.base.as_ref()), utils::ByteBuf(self.quote.as_ref()), utils::ByteBuf(self.hash.as_ref()), self.owner, self.otype, self.status, self.sell_amount, self.remained_sell_amount, self.buy_amount, self.remained_buy_amount);
+            eprintln!("[order]: Base[0x{:02x}], Quote[0x{:02x}], Hash[0x{:02x}], Owner[{:#?}], Price[{:#?}], Type[{:#?}], Status[{:#?}], SellAmount[{:#?}], RemainedSellAmount[{:#?}], BuyAmount[{:#?}], RemainBuyAmount[{:#?}]", utils::ByteBuf(self.base.as_ref()), utils::ByteBuf(self.quote.as_ref()), utils::ByteBuf(self.hash.as_ref()), self.owner, self.price, self.otype, self.status, self.sell_amount, self.remained_sell_amount, self.buy_amount, self.remained_buy_amount);
         }
     }
 }
@@ -156,7 +156,7 @@ impl<T> Trade<T> where T: Trait {
 
     pub fn debug_log(&self) {
         if_std! {
-            eprintln!("[trade]: Base[0x{:02x}], Quote[0x{:02x}], trade_hash[0x{:02x}], buyer[{:#?}], seller[{:#?}], maker[{:#?}], taker[{:#?}], Type[{:#?}], price[{:#?}], base_amout[{:#?}], quote_amout[{:#?}]", utils::ByteBuf(self.base.as_ref()), utils::ByteBuf(self.quote.as_ref()), utils::ByteBuf(self.hash.as_ref()), self.buyer, self.seller, self.maker, self.taker, self.otype, self.price, self.base_amount, self.quote_amount);
+            eprintln!("[trade]: Base[0x{:02x}], Quote[0x{:02x}], Hash[0x{:02x}], buyer[{:#?}], seller[{:#?}], maker[{:#?}], taker[{:#?}], Type[{:#?}], price[{:#?}], base_amout[{:#?}], quote_amout[{:#?}]", utils::ByteBuf(self.base.as_ref()), utils::ByteBuf(self.quote.as_ref()), utils::ByteBuf(self.hash.as_ref()), self.buyer, self.seller, self.maker, self.taker, self.otype, self.price, self.base_amount, self.quote_amount);
         }
 
     }
@@ -788,7 +788,7 @@ impl<T: Trait> Module<T> {
 				Self::into_128(seller_order.remained_buy_amount)? * T::PriceFactor::get() / maker_order.price.into();
 			let buy_amount_v2 = quote_qty * Self::into_128(maker_order.price)? / T::PriceFactor::get();
 			if buy_amount_v2 != Self::into_128(seller_order.remained_buy_amount)? && 
-                Self::into_128(seller_order.remained_sell_amount)? > quote_qty // have fraction, seller(Filled) give more to align
+                Self::into_128(buyer_order.remained_buy_amount)? > quote_qty // have fraction, seller(Filled) give more to align
             {
 				quote_qty = quote_qty + 1;
 			}
@@ -816,7 +816,7 @@ impl<T: Trait> Module<T> {
 				Self::into_128(buyer_order.remained_buy_amount)? * maker_order.price.into() / T::PriceFactor::get();
 			let buy_amount_v2 = base_qty * T::PriceFactor::get() / maker_order.price.into();
 			if buy_amount_v2 != Self::into_128(buyer_order.remained_buy_amount)? &&
-                Self::into_128(buyer_order.remained_sell_amount)? > base_qty // have fraction, buyer(Filled) give more to align
+                Self::into_128(seller_order.remained_buy_amount)? > base_qty // have fraction, buyer(Filled) give more to align
             {
 				base_qty = base_qty + 1;
 			}
@@ -2904,7 +2904,71 @@ mod tests {
 			let alice = 10;
 			let bob = 20;
 
-			let order1 = LimitOrder::<Test> {
+			let mut order1 = LimitOrder::<Test> {
+				hash: H256::from_low_u64_be(0),
+				base: H256::from_low_u64_be(0),
+				quote: H256::from_low_u64_be(0),
+				owner: alice,
+				price: TradeModule::from_128(390000000).unwrap(),
+				sell_amount: 3120,
+				remained_sell_amount: 1590,
+				buy_amount: 800,
+				remained_buy_amount: 300,
+				otype: OrderType::Buy,
+				status: OrderStatus::PartialFilled,
+			};
+
+			let mut order2 = LimitOrder::<Test> {
+				hash: H256::from_low_u64_be(0),
+				base: H256::from_low_u64_be(0),
+				quote: H256::from_low_u64_be(0),
+				owner: bob,
+				price: TradeModule::from_128(342000000).unwrap(),
+				sell_amount: 400,
+				remained_sell_amount: 400,
+				buy_amount: 1368,
+				remained_buy_amount: 1368,
+				otype: OrderType::Sell,
+				status: OrderStatus::Created,
+			};
+
+			let result = TradeModule::calculate_ex_amount(&order2, &order1).unwrap();
+			assert_eq!(result.0, 1026);
+			assert_eq!(result.1, 300);
+
+			let mut order1 = LimitOrder::<Test> {
+				hash: H256::from_low_u64_be(0),
+				base: H256::from_low_u64_be(0),
+				quote: H256::from_low_u64_be(0),
+				owner: alice,
+				price: TradeModule::from_128(390000000).unwrap(),
+				sell_amount: 1170,
+				remained_sell_amount: 594,
+				buy_amount: 300,
+				remained_buy_amount: 134,
+				otype: OrderType::Buy,
+				status: OrderStatus::PartialFilled,
+			};
+
+			let mut order2 = LimitOrder::<Test> {
+				hash: H256::from_low_u64_be(0),
+				base: H256::from_low_u64_be(0),
+				quote: H256::from_low_u64_be(0),
+				owner: bob,
+				price: TradeModule::from_128(369000000).unwrap(),
+				sell_amount: 1000,
+				remained_sell_amount: 200,
+				buy_amount: 3690,
+				remained_buy_amount: 498,
+				otype: OrderType::Sell,
+				status: OrderStatus::PartialFilled,
+			};
+
+			let result = TradeModule::calculate_ex_amount(&order2, &order1).unwrap();
+			assert_eq!(result.0, 498);
+			assert_eq!(result.1, 134);
+
+			let mut order1 = LimitOrder::<Test> {
 				hash: H256::from_low_u64_be(0),
 				base: H256::from_low_u64_be(0),
 				quote: H256::from_low_u64_be(0),
