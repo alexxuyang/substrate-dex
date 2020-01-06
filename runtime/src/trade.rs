@@ -775,6 +775,20 @@ impl<T: Trait> Module<T> {
 				quote_qty = quote_qty + 1;
 			}
 
+
+            if_std! {
+                // let qty = Self::into_128(1)? * quote_qty.into();
+                eprintln!("1, calculate exchange amount");
+                // eprintln!("match price is: {:#?}", Self::into_128(1)? * maker_order.price.into());
+                eprintln!("match price is: {:#?}", maker_order.price);
+                eprintln!("seller order give amount (seller_order.remain_buy_amount): {:#?}", seller_order.remained_buy_amount);
+                eprintln!("buy order give amount: {:#?}", quote_qty);
+                eprintln!("maker order: ");
+                maker_order.debug_log();
+                eprintln!("taker order: ");
+                taker_order.debug_log();
+            }
+
 			return Ok
 			((
 				seller_order.remained_buy_amount, 
@@ -787,6 +801,19 @@ impl<T: Trait> Module<T> {
 			if buy_amount_v2 != Self::into_128(buyer_order.remained_buy_amount)? { // have fraction, buyer(Filled) give more to align
 				base_qty = base_qty + 1;
 			}
+
+            if_std! {
+                // let qty = Self::into_128(1)? * base_qty.into();
+                eprintln!("2, calculate exchange amount");
+                // eprintln!("match price is: {:#?}", Self::into_128(1)? * maker_order.price.into());
+                eprintln!("match price is: {:#?}", maker_order.price);
+                eprintln!("seller order give amount : {:#?}", base_qty);
+                eprintln!("buy order give amount (buyer_order.remain_buy_amount): {:#?}", buyer_order.remained_buy_amount);
+                eprintln!("maker order: ");
+                maker_order.debug_log();
+                eprintln!("taker order: ");
+                taker_order.debug_log();
+            }
 
 			return Ok
 			((
