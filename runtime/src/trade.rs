@@ -771,10 +771,11 @@ impl<T: Trait> Module<T> {
 			let mut quote_qty: u128 = 
 				Self::into_128(seller_order.remained_buy_amount)? * T::PriceFactor::get() / maker_order.price.into();
 			let buy_amount_v2 = quote_qty * Self::into_128(maker_order.price)? / T::PriceFactor::get();
-			if buy_amount_v2 != Self::into_128(seller_order.remained_buy_amount)? { // have fraction, seller(Filled) give more to align
+			if buy_amount_v2 != Self::into_128(seller_order.remained_buy_amount)? && 
+                Self::into_128(seller_order.remained_sell_amount)? > quote_qty // have fraction, seller(Filled) give more to align
+            {
 				quote_qty = quote_qty + 1;
 			}
-
 
             if_std! {
                 // let qty = Self::into_128(1)? * quote_qty.into();
@@ -798,7 +799,9 @@ impl<T: Trait> Module<T> {
 			let mut base_qty: u128 = 
 				Self::into_128(buyer_order.remained_buy_amount)? * maker_order.price.into() / T::PriceFactor::get();
 			let buy_amount_v2 = base_qty * T::PriceFactor::get() / maker_order.price.into();
-			if buy_amount_v2 != Self::into_128(buyer_order.remained_buy_amount)? { // have fraction, buyer(Filled) give more to align
+			if buy_amount_v2 != Self::into_128(buyer_order.remained_buy_amount)? &&
+                Self::into_128(buyer_order.remained_sell_amount)? > base_qty // have fraction, buyer(Filled) give more to align
+            {
 				base_qty = base_qty + 1;
 			}
 
