@@ -1149,6 +1149,8 @@ mod tests {
 		type Price = u128;
 		type PriceFactor = PriceFactor;
 		type BlocksPerDay = BlocksPerDay;
+        type OpenedOrdersArrayCap = OpenedOrdersArrayCap;
+        type ClosedOrdersArrayCap = ClosedOrdersArrayCap;
 	}
 
 	// This function basically just builds a genesis storage key/value store according to
