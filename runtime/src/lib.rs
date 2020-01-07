@@ -221,6 +221,8 @@ parameter_types! {
 	pub const TransactionByteFee: Balance = 1;
     pub const PriceFactor: u128 = 100_000_000;
     pub const BlocksPerDay: u32 = 6 * 60 * 24;
+    pub const OpenedOrdersArrayCap: u8 = 20;
+    pub const ClosedOrdersArrayCap: u8 = 100;
 }
 
 impl transaction_payment::Trait for Runtime {
@@ -246,6 +248,8 @@ impl trade::Trait for Runtime {
 	type Price = u128;
 	type PriceFactor = PriceFactor;
 	type BlocksPerDay = BlocksPerDay;
+    type OpenedOrdersArrayCap = OpenedOrdersArrayCap;
+    type ClosedOrdersArrayCap = ClosedOrdersArrayCap;
 }
 
 construct_runtime!(
