@@ -18,6 +18,8 @@ pub trait Trait: token::Trait + system::Trait {
 	type Price: Parameter + Default + Member + Bounded + SimpleArithmetic + Copy + From<u128> + Into<u128>;
 	type PriceFactor: Get<u128>;
 	type BlocksPerDay: Get<u32>;
+	type OpenedOrdersArrayCap: Get<u8>;
+	type ClosedOrdersArrayCap: Get<u8>;
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq)]
@@ -212,9 +214,9 @@ decl_storage! {
 		/// (BaseTokenHash, quoteTokenHash) => TradePairHash
 		TradePairsHashByBaseQuote get(fn trade_pair_hash_by_base_quote): map (T::Hash, T::Hash) => Option<T::Hash>;
 		/// Index => TradePairHash
-		TradePairsHashByIndex get(fn trade_pair_hash_by_index): map u32 => Option<T::Hash>;
+		TradePairsHashByIndex get(fn trade_pair_hash_by_index): map u64 => Option<T::Hash>;
 		/// Index
-		TradePairsIndex get(fn trade_pair_index): u32;
+		TradePairsIndex get(fn trade_pair_index): u64;
 
 		/// OrderHash => Order
 		Orders get(fn order): map T::Hash => Option<LimitOrder<T>>;
@@ -247,6 +249,12 @@ decl_storage! {
 		OwnedTPTrades get(fn owned_tp_trades): map (T::AccountId, T::Hash, u64) => Option<T::Hash>;
 		/// (AccountId, TradePairHash) => u64
 		OwnedTPTradesIndex get(fn owned_tp_trades_index): map (T::AccountId, T::Hash) => u64;
+
+        /// (AccountId, TradePairHash) => Vec<OrderHash>
+        OwnedTPOpenedOrders get(fn owned_tp_opened_orders): map (T::AccountId, T::Hash) => Option<Vec<T::Hash>>;
+
+        /// (AccountId, TradePairHash) => Vec<OrderHash>
+        OwnedTPClosedOrders get(fn owned_tp_closed_orders): map (T::AccountId, T::Hash) => Option<Vec<T::Hash>>;
 
 		/// (TradePairHash, u64) => TradeHash
 		TradePairOwnedTrades get(fn trade_pair_owned_trades): map (T::Hash, u64) => Option<T::Hash>;
@@ -314,6 +322,67 @@ impl<T: Trait> OwnedTPTrades<T> {
 		let index = OwnedTPTradesIndex::<T>::get((account_id.clone(), tp_hash));
 		Self::insert((account_id.clone(), tp_hash, index), trade_hash);
 		OwnedTPTradesIndex::<T>::insert((account_id.clone(), tp_hash), index + 1);
+	}
+}
+
+impl<T: Trait> OwnedTPOpenedOrders<T> {
+	fn add_order(account_id: T::AccountId, tp_hash: T::Hash, order_hash: T::Hash) {
+
+		let mut orders;
+		if let Some(ts) = Self::get((account_id.clone(), tp_hash)) {
+			orders = ts;
+		} else {
+			orders = Vec::<T::Hash>::new();
+		}
+
+        match orders.iter().position(|&x| x == order_hash) {
+            Some(_) => return,
+            None => {
+                orders.insert(0, order_hash);
+                if orders.len() == T::OpenedOrdersArrayCap::get() as usize {
+                    orders.pop();
+                }
+
+                <OwnedTPOpenedOrders<T>>::insert((account_id, tp_hash), orders);
+            }
+        }
+	}
+
+	fn remove_order(account_id: T::AccountId, tp_hash: T::Hash, order_hash: T::Hash) {
+	
+		let mut orders;
+		if let Some(ts) = Self::get((account_id.clone(), tp_hash)) {
+			orders = ts;
+		} else {
+			orders = Vec::<T::Hash>::new();
+		}
+
+        orders.retain(|&x| x != order_hash);
+        <OwnedTPOpenedOrders<T>>::insert((account_id, tp_hash), orders);
+	}
+}
+
+impl<T: Trait> OwnedTPClosedOrders<T> {
+	fn add_order(account_id: T::AccountId, tp_hash: T::Hash, order_hash: T::Hash) {
+
+		let mut orders;
+		if let Some(ts) = Self::get((account_id.clone(), tp_hash)) {
+			orders = ts;
+		} else {
+			orders = Vec::<T::Hash>::new();
+		}
+
+        match orders.iter().position(|&x| x == order_hash) {
+            Some(_) => return,
+            None => {
+                orders.insert(0, order_hash);
+                if orders.len() == T::ClosedOrdersArrayCap::get() as usize {
+                    orders.pop();
+                }
+
+                <OwnedTPClosedOrders<T>>::insert((account_id, tp_hash), orders);
+            }
+        }
 	}
 }
 
@@ -557,6 +626,8 @@ impl<T: Trait> Module<T> {
 		Orders::insert(hash, order.clone());
 		Nonce::mutate(|n| *n += 1);
 		Self::deposit_event(RawEvent::OrderCreated(sender.clone(), base, quote, hash, order.clone()));
+        <OwnedTPOpenedOrders<T>>::add_order(sender.clone(), tp_hash, order.hash);
+
         order.debug_log();
 
 		let owned_index = Self::owned_orders_index(sender.clone());
@@ -574,7 +645,10 @@ impl<T: Trait> Module<T> {
 		if !filled {
 			<OrderLinkedItemList<T>>::append(tp_hash, price, hash, order.remained_sell_amount, order.remained_buy_amount, otype);
             Self::debug_log_market(tp_hash);
-		}
+		} else {
+            <OwnedTPOpenedOrders<T>>::remove_order(sender.clone(), tp_hash, order.hash);
+            <OwnedTPClosedOrders<T>>::add_order(sender.clone(), tp_hash, order.hash);
+        }
 
         if_std! {
             eprintln!("create limit order end");
@@ -679,6 +753,9 @@ impl<T: Trait> Module<T> {
 						order.remained_sell_amount = Zero::zero();
 					}
 
+                    <OwnedTPOpenedOrders<T>>::remove_order(order.owner.clone(), tp_hash, order.hash);
+                    <OwnedTPClosedOrders<T>>::add_order(order.owner.clone(), tp_hash, order.hash);
+
 					ensure!(order.is_finished(), Error::<T>::OrderMatchOrderIsNotFinished);
 				}
 
@@ -688,6 +765,9 @@ impl<T: Trait> Module<T> {
 						<token::Module<T>>::do_unfreeze(o.owner.clone(), have, o.remained_sell_amount)?;
 						o.remained_sell_amount = Zero::zero();
 					}
+
+                    <OwnedTPOpenedOrders<T>>::remove_order(o.owner.clone(), tp_hash, o.hash);
+                    <OwnedTPClosedOrders<T>>::add_order(o.owner.clone(), tp_hash, o.hash);
 
 					ensure!(o.is_finished(), Error::<T>::OrderMatchOrderIsNotFinished);
 				}
@@ -794,9 +874,7 @@ impl<T: Trait> Module<T> {
 			}
 
             if_std! {
-                // let qty = Self::into_128(1)? * quote_qty.into();
                 eprintln!("1, calculate exchange amount");
-                // eprintln!("match price is: {:#?}", Self::into_128(1)? * maker_order.price.into());
                 eprintln!("match price is: {:#?}", maker_order.price);
                 eprintln!("seller order give amount (seller_order.remain_buy_amount): {:#?}", seller_order.remained_buy_amount);
                 eprintln!("buy order give amount: {:#?}", quote_qty);
@@ -822,9 +900,7 @@ impl<T: Trait> Module<T> {
 			}
 
             if_std! {
-                // let qty = Self::into_128(1)? * base_qty.into();
                 eprintln!("2, calculate exchange amount");
-                // eprintln!("match price is: {:#?}", Self::into_128(1)? * maker_order.price.into());
                 eprintln!("match price is: {:#?}", maker_order.price);
                 eprintln!("seller order give amount : {:#?}", base_qty);
                 eprintln!("buy order give amount (buyer_order.remain_buy_amount): {:#?}", buyer_order.remained_buy_amount);
@@ -912,6 +988,9 @@ impl<T: Trait> Module<T> {
 
 		order.status = OrderStatus::Canceled;
 		<Orders<T>>::insert(order_hash, order.clone());
+
+        <OwnedTPOpenedOrders<T>>::remove_order(sender.clone(), tp_hash, order_hash);
+        <OwnedTPClosedOrders<T>>::add_order(sender.clone(), tp_hash, order_hash);
 
         order.debug_log();
         Self::debug_log_market(tp_hash);
@@ -1057,6 +1136,8 @@ mod tests {
 	parameter_types! {
         pub const PriceFactor: u128 = 100_000_000;
         pub const BlocksPerDay: u32 = 10;
+        pub const OpenedOrdersArrayCap: u8 = 20;
+        pub const ClosedOrdersArrayCap: u8 = 100;
 	}
 
 	impl token::Trait for Test {
@@ -1068,6 +1149,8 @@ mod tests {
 		type Price = u128;
 		type PriceFactor = PriceFactor;
 		type BlocksPerDay = BlocksPerDay;
+        type OpenedOrdersArrayCap = OpenedOrdersArrayCap;
+        type ClosedOrdersArrayCap = ClosedOrdersArrayCap;
 	}
 
 	// This function basically just builds a genesis storage key/value store according to
