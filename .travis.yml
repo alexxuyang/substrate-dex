@@ -1,0 +1,10 @@
+language: rust
+
+rust:
+  - nightly
+
+script:
+  - rustup target add wasm32-unknown-unknown --toolchain nightly
+  - cargo build --release --all
+  - cargo test --all
+
