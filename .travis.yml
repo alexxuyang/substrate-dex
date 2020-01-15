@@ -3,8 +3,10 @@ language: rust
 rust:
   - nightly
 
+cache: cargo
+
 script:
   - rustup target add wasm32-unknown-unknown --toolchain nightly
   - cargo build --release --all
-  - cargo test --all
+  - cargo test -p substrate-dex -- --test-threads=1 --nocapture
 
