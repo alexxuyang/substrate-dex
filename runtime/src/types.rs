@@ -141,9 +141,6 @@ where
 					item = Self::read(key1, item.next);
 				}
 
-				// add key2 after item
-				// item(new_prev) -> key2 -> item.next(new_next)
-
 				// update new_prev
 				let new_prev = LinkedItem {
 					next: Some(key2),
