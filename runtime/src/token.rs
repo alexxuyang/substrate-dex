@@ -30,6 +30,8 @@ decl_error! {
 		AmountOverflow,
 		/// Sender does not have token
 		SenderHaveNoToken,
+		/// Memo length exceed limitation
+		MemoLengthExceedLimitation,
 	}
 }
 
@@ -74,7 +76,7 @@ decl_module! {
 
         pub fn transfer(origin, token_hash: T::Hash, to: T::AccountId, amount: T::Balance) -> dispatch::DispatchResult {
             let sender = ensure_signed(origin)?;
-            Self::do_transfer(sender.clone(), token_hash, to.clone(), amount)?;
+            Self::do_transfer(sender.clone(), token_hash, to.clone(), amount, None)?;
             Self::deposit_event(RawEvent::Transferd(sender, to, token_hash, amount));
 
             Ok(())
@@ -128,9 +130,14 @@ impl<T: Trait> Module<T> {
         hash: T::Hash,
         to: T::AccountId,
         amount: T::Balance,
+        memo: Option<Vec<u8>>,
     ) -> dispatch::DispatchResult {
         let token = Self::token(hash);
         ensure!(token.is_some(), Error::<T>::NoMatchingToken);
+
+        if let Some(memo) = memo {
+            ensure!(memo.len() <= 512, Error::<T>::MemoLengthExceedLimitation);
+        }
 
         ensure!(
             <FreeBalanceOf<T>>::exists((sender.clone(), hash)),

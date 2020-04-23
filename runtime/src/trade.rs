@@ -737,8 +737,8 @@ impl<T: Trait> Module<T> {
 				<token::Module<T>>::do_unfreeze(order.owner.clone(), give, give_qty)?;
 				<token::Module<T>>::do_unfreeze(o.owner.clone(), have, have_qty)?;
 
-				<token::Module<T>>::do_transfer(order.owner.clone(), give, o.owner.clone(), give_qty)?;
-				<token::Module<T>>::do_transfer(o.owner.clone(), have, order.owner.clone(), have_qty)?;
+				<token::Module<T>>::do_transfer(order.owner.clone(), give, o.owner.clone(), give_qty, None)?;
+				<token::Module<T>>::do_transfer(o.owner.clone(), have, order.owner.clone(), have_qty, None)?;
 
 				order.remained_sell_amount = order.remained_sell_amount.checked_sub(&give_qty).ok_or(Error::<T>::OrderMatchSubstractError)?;
 				order.remained_buy_amount = order.remained_buy_amount.checked_sub(&have_qty).ok_or(Error::<T>::OrderMatchSubstractError)?;
