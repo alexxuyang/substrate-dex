@@ -74,9 +74,10 @@ decl_module! {
             Self::do_issue(origin, symbol, total_supply)
         }
 
-        pub fn transfer(origin, token_hash: T::Hash, to: T::AccountId, amount: T::Balance) -> dispatch::DispatchResult {
+        pub fn transfer(origin, token_hash: T::Hash, to: T::AccountId, amount: T::Balance, memo: Option<Vec<u8>>)
+        -> dispatch::DispatchResult {
             let sender = ensure_signed(origin)?;
-            Self::do_transfer(sender.clone(), token_hash, to.clone(), amount, None)?;
+            Self::do_transfer(sender.clone(), token_hash, to.clone(), amount, memo)?;
             Self::deposit_event(RawEvent::Transferd(sender, to, token_hash, amount));
 
             Ok(())
@@ -354,7 +355,8 @@ mod tests {
                 Origin::signed(alice),
                 token.hash,
                 bob,
-                100
+                100,
+                None
             ));
             assert_eq!(TokenModule::balance_of((alice, token.hash)), 20999900);
             assert_eq!(TokenModule::free_balance_of((alice, token.hash)), 20999900);
@@ -364,15 +366,15 @@ mod tests {
             assert_eq!(TokenModule::freezed_balance_of((bob, token.hash)), 0);
 
             assert_err!(
-                TokenModule::transfer(Origin::signed(bob), H256::from_low_u64_be(0), charlie, 101),
+                TokenModule::transfer(Origin::signed(bob), H256::from_low_u64_be(0), charlie, 101, None),
                 Error::<Test>::NoMatchingToken
             );
             assert_err!(
-                TokenModule::transfer(Origin::signed(charlie), token.hash, bob, 101),
+                TokenModule::transfer(Origin::signed(charlie), token.hash, bob, 101, None),
                 Error::<Test>::SenderHaveNoToken
             );
             assert_err!(
-                TokenModule::transfer(Origin::signed(bob), token.hash, charlie, 101),
+                TokenModule::transfer(Origin::signed(bob), token.hash, charlie, 101, None),
                 Error::<Test>::BalanceNotEnough
             );
         });
