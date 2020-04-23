@@ -116,12 +116,6 @@ impl<T> LimitOrder<T> where T: Trait {
 	pub fn is_finished(&self) -> bool {
 		(self.remained_buy_amount == Zero::zero() && self.status == OrderStatus::Filled) || self.status == OrderStatus::Canceled
 	}
-
-    pub fn debug_log(&self) {
-        if_std! {
-            eprintln!("[order]: Base[0x{:02x}], Quote[0x{:02x}], Hash[0x{:02x}], Owner[{:#?}], Price[{:#?}], Type[{:#?}], Status[{:#?}], SellAmount[{:#?}], RemainedSellAmount[{:#?}], BuyAmount[{:#?}], RemainBuyAmount[{:#?}]", utils::ByteBuf(self.base.as_ref()), utils::ByteBuf(self.quote.as_ref()), utils::ByteBuf(self.hash.as_ref()), self.owner, self.price, self.otype, self.status, self.sell_amount, self.remained_sell_amount, self.buy_amount, self.remained_buy_amount);
-        }
-    }
 }
 
 impl<T> Trade<T> where T: Trait {
@@ -155,13 +149,6 @@ impl<T> Trade<T> where T: Trait {
 			price: maker_order.price,
 		}
 	}
-
-    pub fn debug_log(&self) {
-        if_std! {
-            eprintln!("[trade]: Base[0x{:02x}], Quote[0x{:02x}], Hash[0x{:02x}], buyer[{:#?}], seller[{:#?}], maker[{:#?}], taker[{:#?}], Type[{:#?}], price[{:#?}], base_amout[{:#?}], quote_amout[{:#?}]", utils::ByteBuf(self.base.as_ref()), utils::ByteBuf(self.quote.as_ref()), utils::ByteBuf(self.hash.as_ref()), self.buyer, self.seller, self.maker, self.taker, self.otype, self.price, self.base_amount, self.quote_amount);
-        }
-
-    }
 }
 
 type OrderLinkedItem<T> = types::LinkedItem<<T as system::Trait>::Hash, <T as Trait>::Price, <T as balances::Trait>::Balance>;
@@ -603,10 +590,6 @@ impl<T: Trait> Module<T> {
 	fn do_create_limit_order(sender: T::AccountId, base: T::Hash, quote: T::Hash, otype: OrderType, price: T::Price, 
 		sell_amount: T::Balance) -> dispatch::DispatchResult {
 		
-        if_std! {
-            eprintln!("create limit order begin");
-        }
-
 		Self::ensure_bounds(price, sell_amount)?;
 		let buy_amount = Self::ensure_counterparty_amount_bounds(otype, price, sell_amount)?;
 
@@ -628,8 +611,6 @@ impl<T: Trait> Module<T> {
 		Self::deposit_event(RawEvent::OrderCreated(sender.clone(), base, quote, hash, order.clone()));
         <OwnedTPOpenedOrders<T>>::add_order(sender.clone(), tp_hash, order.hash);
 
-        order.debug_log();
-
 		let owned_index = Self::owned_orders_index(sender.clone());
 		OwnedOrders::<T>::insert((sender.clone(), owned_index), hash);
 		OwnedOrdersIndex::<T>::insert(sender.clone(), owned_index + 1);
@@ -644,24 +625,15 @@ impl<T: Trait> Module<T> {
 		// add order to the market order list
 		if !filled {
 			<OrderLinkedItemList<T>>::append(tp_hash, price, hash, order.remained_sell_amount, order.remained_buy_amount, otype);
-            Self::debug_log_market(tp_hash);
 		} else {
             <OwnedTPOpenedOrders<T>>::remove_order(sender.clone(), tp_hash, order.hash);
             <OwnedTPClosedOrders<T>>::add_order(sender.clone(), tp_hash, order.hash);
-        }
-
-        if_std! {
-            eprintln!("create limit order end");
         }
 
 		Ok(())
 	}
 
 	fn order_match(tp_hash: T::Hash, order: &mut LimitOrder<T>) -> result::Result<bool, dispatch::DispatchError> {
-        if_std! {
-            eprintln!("order match begin");
-        }
-
 		let mut head = <OrderLinkedItemList<T>>::read_head(tp_hash);
 
 		let end_item_price;
@@ -790,11 +762,6 @@ impl<T: Trait> Module<T> {
 
 		        Self::deposit_event(RawEvent::TradeCreated(order.owner.clone(), tp.base, tp.quote, trade.hash, trade.clone()));
 
-                order.debug_log();
-                o.debug_log();
-                trade.debug_log();
-                Self::debug_log_market(tp_hash);
-
 				// save trade reference data to store
 				<OrderOwnedTrades<T>>::add_trade(order.hash, trade.hash);
 				<OrderOwnedTrades<T>>::add_trade(o.hash, trade.hash);
@@ -814,10 +781,6 @@ impl<T: Trait> Module<T> {
 
 			head = <OrderLinkedItemList<T>>::read_head(tp_hash);
 		}
-
-        if_std! {
-            eprintln!("order match end");
-        }
 
 		if order.status == OrderStatus::Filled {
 			Ok(true)
@@ -873,17 +836,6 @@ impl<T: Trait> Module<T> {
 				quote_qty = quote_qty + 1;
 			}
 
-            if_std! {
-                eprintln!("1, calculate exchange amount");
-                eprintln!("match price is: {:#?}", maker_order.price);
-                eprintln!("seller order give amount (seller_order.remain_buy_amount): {:#?}", seller_order.remained_buy_amount);
-                eprintln!("buy order give amount: {:#?}", quote_qty);
-                eprintln!("maker order: ");
-                maker_order.debug_log();
-                eprintln!("taker order: ");
-                taker_order.debug_log();
-            }
-
 			return Ok
 			((
 				seller_order.remained_buy_amount, 
@@ -898,17 +850,6 @@ impl<T: Trait> Module<T> {
             {
 				base_qty = base_qty + 1;
 			}
-
-            if_std! {
-                eprintln!("2, calculate exchange amount");
-                eprintln!("match price is: {:#?}", maker_order.price);
-                eprintln!("seller order give amount : {:#?}", base_qty);
-                eprintln!("buy order give amount (buyer_order.remain_buy_amount): {:#?}", buyer_order.remained_buy_amount);
-                eprintln!("maker order: ");
-                maker_order.debug_log();
-                eprintln!("taker order: ");
-                taker_order.debug_log();
-            }
 
 			return Ok
 			((
@@ -971,11 +912,6 @@ impl<T: Trait> Module<T> {
 	}
 
 	fn do_cancel_limit_order(sender: T::AccountId, order_hash: T::Hash) -> dispatch::DispatchResult {
-        if_std! {
-            eprintln!("cancel limit order begin");
-            eprintln!("[order]: hash[0x{:02x}]", utils::ByteBuf(order_hash.as_ref()));
-        }
-
 		let mut order = Self::order(order_hash).ok_or(Error::<T>::NoMatchingOrder)?;
 
 		ensure!(order.owner == sender, Error::<T>::CanOnlyCancelOwnOrder);
@@ -992,9 +928,6 @@ impl<T: Trait> Module<T> {
         <OwnedTPOpenedOrders<T>>::remove_order(sender.clone(), tp_hash, order_hash);
         <OwnedTPClosedOrders<T>>::add_order(sender.clone(), tp_hash, order_hash);
 
-        order.debug_log();
-        Self::debug_log_market(tp_hash);
-
         let sell_hash = match order.otype {
             OrderType::Buy => order.base,
             OrderType::Sell => order.quote,
@@ -1003,10 +936,6 @@ impl<T: Trait> Module<T> {
         <token::Module<T>>::do_unfreeze(sender.clone(), sell_hash, order.remained_sell_amount)?;
 
 		Self::deposit_event(RawEvent::OrderCanceled(sender, order_hash));
-
-        if_std! {
-            eprintln!("cancel limit order end");
-        }
 
 		Ok(())
 	}
