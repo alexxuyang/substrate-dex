@@ -1,0 +1,70 @@
+[package]
+authors = ['Anonymous']
+description = 'FRAME pallet template'
+edition = '2018'
+homepage = 'https://substrate.dev'
+license = 'Unlicense'
+name = 'pallet-token'
+repository = 'https://github.com/paritytech/substrate/'
+version = '2.0.0-alpha.5'
+
+[dependencies.codec]
+default-features = false
+features = ['derive']
+package = 'parity-scale-codec'
+version = '1.2.0'
+
+[dependencies.frame-support]
+default-features = false
+version = '2.0.0-alpha.5'
+
+[dependencies.balances]
+package = 'pallet-balances'
+default-features = false
+version = '2.0.0-alpha.5'
+
+[dependencies.randomness-collective-flip]
+package = 'pallet-randomness-collective-flip'
+default-features = false
+version = '2.0.0-alpha.5'
+
+[dependencies.safe-mix]
+default-features = false
+version = '1.0.0'
+
+[dependencies.system]
+default-features = false
+package = 'frame-system'
+version = '2.0.0-alpha.5'
+
+[dependencies.sp-std]
+default-features = false
+version = '2.0.0-alpha.5'
+
+[dependencies.sp-runtime]
+default-features = false
+version = '2.0.0-alpha.5'
+
+[dev-dependencies.sp-io]
+default-features = false
+version = '2.0.0-alpha.5'
+
+[dev-dependencies.sp-core]
+default-features = false
+version = '2.0.0-alpha.5'
+
+[dev-dependencies.sp-runtime]
+default-features = false
+version = '2.0.0-alpha.5'
+
+[features]
+default = ['std']
+std = [
+    'codec/std',
+    'frame-support/std',
+    'safe-mix/std',
+    'system/std',
+    'sp-runtime/std',
+    'balances/std',
+    'randomness-collective-flip/std'
+]
