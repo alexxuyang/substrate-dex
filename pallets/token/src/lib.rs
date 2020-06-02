@@ -1,3 +1,5 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+
 use codec::{Decode, Encode};
 use sp_std::prelude::Vec;
 use sp_runtime::{traits::{Bounded, Hash}};
@@ -5,7 +7,17 @@ use frame_support::{
     decl_error, decl_event, decl_module, decl_storage, ensure, dispatch, StorageMap, StorageValue, traits::Randomness
 };
 
-use system::ensure_signed;
+use frame_system::ensure_signed;
+
+use pallet_balances as balances;
+use frame_system as system;
+use pallet_randomness_collective_flip as randomness_collective_flip;
+
+#[cfg(test)]
+mod mock;
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Encode, Decode, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "std", derive(Debug))]
@@ -51,16 +63,16 @@ decl_event!(
 
 decl_storage! {
     trait Store for Module<T: Trait> as TokenModule {
-        Tokens get(token): map T::Hash => Option<Token<T::Hash, T::Balance>>;
-        Owners get(owner): map T::Hash => Option<T::AccountId>;
-        BalanceOf get(balance_of): map (T::AccountId, T::Hash) => T::Balance;
-        FreeBalanceOf get(free_balance_of): map (T::AccountId, T::Hash) => T::Balance;
-        FreezedBalanceOf get(freezed_balance_of): map (T::AccountId, T::Hash) => T::Balance;
+        Tokens get(fn token): map hasher(blake2_128_concat) T::Hash => Option<Token<T::Hash, T::Balance>>;
+        Owners get(fn owner): map hasher(blake2_128_concat) T::Hash => Option<T::AccountId>;
+        BalanceOf get(fn balance_of): map hasher(blake2_128_concat) (T::AccountId, T::Hash) => T::Balance;
+        FreeBalanceOf get(fn free_balance_of): map hasher(blake2_128_concat) (T::AccountId, T::Hash) => T::Balance;
+        FreezedBalanceOf get(fn freezed_balance_of): map hasher(blake2_128_concat) (T::AccountId, T::Hash) => T::Balance;
 
-        OwnedTokens get(owned_token): map (T::AccountId, u64) => Option<T::Hash>;
-        OwnedTokensIndex get(owned_token_index): map T::AccountId => u64;
+        OwnedTokens get(fn owned_token): map hasher(blake2_128_concat) (T::AccountId, u64) => Option<T::Hash>;
+        OwnedTokensIndex get(fn owned_token_index): map hasher(blake2_128_concat) T::AccountId => u64;
 
-        Nonce: u64;
+        Nonce get(fn nonce): u64;
     }
 }
 
@@ -70,27 +82,19 @@ decl_module! {
 
         type Error = Error<T>;
 
+		#[weight = 200_000]
         pub fn issue(origin, symbol: Vec<u8>, total_supply: T::Balance) -> dispatch::DispatchResult {
             Self::do_issue(origin, symbol, total_supply)
         }
 
+		#[weight = 200_000]
         pub fn transfer(origin, token_hash: T::Hash, to: T::AccountId, amount: T::Balance, memo: Option<Vec<u8>>)
-        -> dispatch::DispatchResult {
+            -> dispatch::DispatchResult {
             let sender = ensure_signed(origin)?;
             Self::do_transfer(sender.clone(), token_hash, to.clone(), amount, memo)?;
             Self::deposit_event(RawEvent::Transferd(sender, to, token_hash, amount));
 
             Ok(())
-        }
-
-        pub fn freeze(origin, hash: T::Hash, amount: T::Balance) -> dispatch::DispatchResult {
-            let sender = ensure_signed(origin)?;
-            Self::do_freeze(sender, hash, amount)
-        }
-
-        pub fn unfreeze(origin, hash: T::Hash, amount: T::Balance) -> dispatch::DispatchResult {
-            let sender = ensure_signed(origin)?;
-            Self::do_unfreeze(sender, hash, amount)
         }
     }
 }
@@ -141,7 +145,7 @@ impl<T: Trait> Module<T> {
         }
 
         ensure!(
-            <FreeBalanceOf<T>>::exists((sender.clone(), hash)),
+            <FreeBalanceOf<T>>::contains_key((sender.clone(), hash)),
             Error::<T>::SenderHaveNoToken 
         );
 
@@ -183,7 +187,7 @@ impl<T: Trait> Module<T> {
         ensure!(token.is_some(), Error::<T>::NoMatchingToken);
 
         ensure!(
-            FreeBalanceOf::<T>::exists((sender.clone(), hash)),
+            FreeBalanceOf::<T>::contains_key((sender.clone(), hash)),
             Error::<T>::SenderHaveNoToken
         );
 
@@ -212,7 +216,7 @@ impl<T: Trait> Module<T> {
         ensure!(token.is_some(), Error::<T>::NoMatchingToken);
 
         ensure!(
-            FreeBalanceOf::<T>::exists((sender.clone(), hash)),
+            FreeBalanceOf::<T>::contains_key((sender.clone(), hash)),
             Error::<T>::SenderHaveNoToken
         );
 
@@ -241,7 +245,7 @@ impl<T: Trait> Module<T> {
         ensure!(token.is_some(), Error::<T>::NoMatchingToken);
 
         ensure!(
-            FreeBalanceOf::<T>::exists((sender.clone(), hash.clone())),
+            FreeBalanceOf::<T>::contains_key((sender.clone(), hash.clone())),
             Error::<T>::SenderHaveNoToken
         );
 
@@ -252,131 +256,5 @@ impl<T: Trait> Module<T> {
         );
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-	use frame_support::{assert_ok, assert_err, impl_outer_origin, parameter_types, weights::Weight};
-	use sp_core::H256;
-	use sp_runtime::{
-		traits::{BlakeTwo256, IdentityLookup}, testing::Header, Perbill
-	};
-
-	impl_outer_origin! {
-		pub enum Origin for Test {}
-	}
-
-	#[derive(Clone, Eq, PartialEq)]
-	pub struct Test;
-	parameter_types! {
-		pub const BlockHashCount: u64 = 250;
-		pub const MaximumBlockWeight: Weight = 1024;
-		pub const MaximumBlockLength: u32 = 2 * 1024;
-		pub const AvailableBlockRatio: Perbill = Perbill::one();
-	}
-	impl system::Trait for Test {
-		type Origin = Origin;
-		type Index = u64;
-		type BlockNumber = u64;
-		type Call = ();
-		type Hash = H256;
-		type Hashing = BlakeTwo256;
-		type AccountId = u64;
-		type Lookup = IdentityLookup<Self::AccountId>;
-		type Header = Header;
-		type Event = ();
-		type BlockHashCount = BlockHashCount;
-		type MaximumBlockWeight = MaximumBlockWeight;
-		type AvailableBlockRatio = AvailableBlockRatio;
-		type MaximumBlockLength = MaximumBlockLength;
-		type Version = ();
-		type ModuleToIndex = ();
-	}
-	parameter_types! {
-		pub const ExistentialDeposit: u64 = 1;
-		pub const TransferFee: u64 = 0;
-		pub const CreationFee: u64 = 0;
-	}
-	impl balances::Trait for Test {
-		type Balance = u64;
-		type OnNewAccount = ();
-		type OnFreeBalanceZero = ();
-		type Event = ();
-		type TransferPayment = ();
-		type DustRemoval = ();
-		type ExistentialDeposit = ExistentialDeposit;
-		type TransferFee = TransferFee;
-		type CreationFee = CreationFee;
-	}
-
-    impl super::Trait for Test {
-        type Event = ();
-    }
-
-    // This function basically just builds a genesis storage key/value store according to
-    // our desired mockup.
-    fn new_test_ext() -> sp_io::TestExternalities {
-        system::GenesisConfig::default()
-            .build_storage::<Test>()
-            .unwrap()
-            .into()
-    }
-
-    type TokenModule = super::Module<Test>;
-
-    #[test]
-    fn token_related_test_case() {
-        new_test_ext().execute_with(|| {
-            let alice = 10u64;
-            let bob = 20u64;
-            let charlie = 30u64;
-
-            assert_ok!(TokenModule::issue(
-                Origin::signed(alice),
-                b"6688".to_vec(),
-                21000000
-            ));
-            assert_eq!(TokenModule::owned_token_index(alice), 1);
-
-            let token_hash = TokenModule::owned_token((alice, 0));
-            assert!(token_hash.is_some());
-            let token_hash = token_hash.unwrap();
-            let token = TokenModule::token(token_hash);
-            assert!(token.is_some());
-            let token = token.unwrap();
-
-            assert_eq!(TokenModule::balance_of((alice, token.hash)), 21000000);
-            assert_eq!(TokenModule::free_balance_of((alice, token.hash)), 21000000);
-            assert_eq!(TokenModule::freezed_balance_of((alice, token.hash)), 0);
-
-            assert_ok!(TokenModule::transfer(
-                Origin::signed(alice),
-                token.hash,
-                bob,
-                100,
-                None
-            ));
-            assert_eq!(TokenModule::balance_of((alice, token.hash)), 20999900);
-            assert_eq!(TokenModule::free_balance_of((alice, token.hash)), 20999900);
-            assert_eq!(TokenModule::freezed_balance_of((alice, token.hash)), 0);
-            assert_eq!(TokenModule::balance_of((bob, token.hash)), 100);
-            assert_eq!(TokenModule::free_balance_of((bob, token.hash)), 100);
-            assert_eq!(TokenModule::freezed_balance_of((bob, token.hash)), 0);
-
-            assert_err!(
-                TokenModule::transfer(Origin::signed(bob), H256::from_low_u64_be(0), charlie, 101, None),
-                Error::<Test>::NoMatchingToken
-            );
-            assert_err!(
-                TokenModule::transfer(Origin::signed(charlie), token.hash, bob, 101, None),
-                Error::<Test>::SenderHaveNoToken
-            );
-            assert_err!(
-                TokenModule::transfer(Origin::signed(bob), token.hash, charlie, 101, None),
-                Error::<Test>::BalanceNotEnough
-            );
-        });
     }
 }
